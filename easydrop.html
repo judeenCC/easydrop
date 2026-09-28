@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EasyDrop - 跨网络文件传输</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        primary: { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81' },
+        accent: { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2' },
+        surface: { light: '#f8fafc', dark: '#0f172a' }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace']
+      }
+    }
+  }
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  * { -webkit-font-smoothing: antialiased; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #f1f5f9;
+    overflow-x: hidden;
+    color: #1e293b;
+  }
+
+  .bg-mesh {
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(at 20% 20%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+      radial-gradient(at 80% 10%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
+      radial-gradient(at 50% 80%, rgba(139, 92, 246, 0.06) 0px, transparent 50%),
+      radial-gradient(at 90% 60%, rgba(236, 72, 153, 0.05) 0px, transparent 50%);
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.2); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.4); }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+  @keyframes pulse-ring {
+    0% { transform: scale(0.95); opacity: 0.7; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+
+  .animate-fade-in { animation: fadeIn 0.5s ease-in-out; }
+  .animate-slide-up { animation: slideUp 0.4s ease-out; }
+  .animate-float { animation: float 3s ease-in-out infinite; }
+
+  .drop-zone {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 2px dashed rgba(99, 102, 241, 0.25);
+    background: rgba(99, 102, 241, 0.02);
+  }
+  .drop-zone.dragover {
+    border-color: rgba(99, 102, 241, 0.6);
+    background: rgba(99, 102, 241, 0.08);
+    transform: scale(1.01);
+  }
+
+  .progress-bar {
+    background: linear-gradient(90deg, #6366f1, #06b6d4, #8b5cf6);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  .pulse-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pulse-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    border: 2px solid rgba(99, 102, 241, 0.4);
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+    animation: pulse-ring 2s ease-out infinite;
+    pointer-events: none;
+  }
+
+  .file-icon-bg {
+    background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(6,182,212,0.12));
+  }
+
+  .tab-active {
+    background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(6,182,212,0.1));
+    border-color: rgba(99,102,241,0.2);
+    color: #4f46e5;
+  }
+
+  textarea { resize: none; }
+
+  .toast {
+    animation: slideUp 0.3s ease-out;
+  }
+
+  .code-display {
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  .code-input {
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.5em;
+    text-align: center;
+    font-size: 2rem;
+    font-weight: 600;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  .status-dot {
+    position: relative;
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-dot::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: -3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.3;
+    animation: status-pulse 2s infinite;
+  }
+
+  @keyframes status-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.4); opacity: 0; }
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #4f46e5, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #06b6d4);
+    transition: all 0.3s ease;
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #4f46e5, #0891b2);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .friend-avatar {
+    background: linear-gradient(135deg, var(--avatar-color-1, #6366f1), var(--avatar-color-2, #06b6d4));
+  }
+
+  .friend-card {
+    transition: all 0.3s ease;
+  }
+  .friend-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  }
+
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(4px);
+  }
+
+  .empty-state-icon {
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1));
+  }
+</style>
+</head>
+<body class="bg-mesh min-h-screen">
+
+<!-- Background decorative elements -->
+<div class="fixed inset-0 overflow-hidden pointer-events-none">
+  <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-500/8 rounded-full blur-3xl animate-float"></div>
+  <div class="absolute top-1/2 -left-40 w-96 h-96 bg-accent-500/8 rounded-full blur-3xl animate-float" style="animation-delay: 1s;"></div>
+  <div class="absolute -bottom-40 right-1/3 w-96 h-96 bg-purple-500/6 rounded-full blur-3xl animate-float" style="animation-delay: 2s;"></div>
+</div>
+
+<!-- Main Container -->
+<div class="relative z-10 min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="glass-strong border-b border-slate-200/50 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
+            <i class="fas fa-bolt text-white text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight text-slate-800">EasyDrop</h1>
+            <p class="text-xs text-slate-400">跨网络文件传输</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div id="connectionStatus" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs">
+            <span class="status-dot bg-red-400 text-red-400"></span>
+            <span class="text-slate-500">未连接</span>
+          </div>
+
+          <button onclick="toggleSettings()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
+            <i class="fas fa-cog text-slate-500"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Hero Section -->
+    <div id="heroSection" class="text-center mb-8 animate-fade-in">
+      <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
+        随时随地，极速传输
+      </h2>
+      <p class="text-slate-500 text-lg max-w-2xl mx-auto">
+        基于 WebRTC 点对点技术，支持跨网络传输任意类型文件，安全、快速、无需注册
+      </p>
+    </div>
+
+    <!-- Tab Switcher -->
+    <div class="flex justify-center mb-8">
+      <div class="glass rounded-2xl p-1.5 inline-flex gap-1">
+        <button id="friendsTab" onclick="switchTab('friends')" class="tab-active px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2">
+          <i class="fas fa-users"></i>
+          <span>好友列表</span>
+        </button>
+        <button id="sendTab" onclick="switchTab('send')" class="px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
+          <i class="fas fa-paper-plane"></i>
+          <span>新建连接</span>
+        </button>
+        <button id="receiveTab" onclick="switchTab('receive')" class="px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
+          <i class="fas fa-download"></i>
+          <span>接收文件</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Friends Mode -->
+    <div id="friendsMode" class="animate-fade-in">
+      <div class="max-w-4xl mx-auto">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold text-slate-800">我的好友</h3>
+            <p class="text-sm text-slate-400">点击好友直接发起传输，无需重复输入连接码</p>
+          </div>
+          <button onclick="switchTab('send')" class="px-4 py-2 rounded-xl btn-primary text-white text-sm font-medium">
+            <i class="fas fa-plus mr-1"></i>
+            添加好友
+          </button>
+        </div>
+
+        <div id="friendsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Friends will be rendered here -->
+        </div>
+
+        <div id="friendsEmptyState" class="glass-strong rounded-3xl p-12 text-center hidden">
+          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
+            <i class="fas fa-user-plus text-3xl text-primary-500"></i>
+          </div>
+          <h3 class="text-xl font-semibold mb-2 text-slate-700">还没有好友</h3>
+          <p class="text-slate-400 text-sm mb-6">建立第一次连接后，对方会自动添加到好友列表</p>
+          <button onclick="switchTab('send')" class="px-6 py-3 rounded-xl btn-primary text-white font-medium">
+            <i class="fas fa-plus mr-2"></i>
+            创建新连接
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Send Mode -->
+    <div id="sendMode" class="hidden animate-fade-in">
+      <div id="sendSetup" class="max-w-2xl mx-auto">
+        <div class="glass-strong rounded-3xl p-8">
+          <div class="text-center mb-6">
+            <div class="pulse-wrapper inline-block mb-4">
+              <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500/15 to-accent-500/15 flex items-center justify-center relative z-10">
+                <i class="fas fa-share-nodes text-3xl text-primary-500"></i>
+              </div>
+              <div class="pulse-ring"></div>
+            </div>
+            <h3 class="text-xl font-semibold mb-2 text-slate-800">创建发送连接</h3>
+            <p class="text-slate-400 text-sm">生成6位连接码，分享给接收方即可开始传输</p>
+          </div>
+
+          <div id="generateCodeStep">
+            <div class="mb-4">
+              <label class="text-sm text-slate-500 mb-2 block">为此次连接命名（可选）</label>
+              <input type="text" id="connectionName" placeholder="例如：传输给同事小王" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+            </div>
+            <button onclick="generateOffer()" class="w-full py-4 rounded-2xl btn-primary text-white font-medium text-lg shadow-lg">
+              <i class="fas fa-bolt mr-2"></i>
+              生成6位连接码
+            </button>
+          </div>
+
+          <div id="shareCodeStep" class="hidden">
+            <div class="bg-slate-50 rounded-2xl p-6 mb-4 border border-slate-200">
+              <p class="text-xs text-slate-400 mb-3 text-center">将此6位连接码发送给接收方</p>
+              <div class="flex items-center justify-center gap-2 mb-4">
+                <div id="codeDisplay" class="code-display text-4xl font-bold gradient-text tracking-widest">
+                  ------
+                </div>
+                <button onclick="copyCode()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
+                  <i class="fas fa-copy text-slate-500"></i>
+                </button>
+              </div>
+              <div class="text-center text-slate-400 text-sm">
+                <i class="fas fa-clock mr-1"></i>
+                <span id="codeTimer">05:00</span> 后过期
+              </div>
+            </div>
+
+            <textarea id="offerCode" class="hidden"></textarea>
+
+            <div class="text-center text-slate-400 text-sm mb-4">
+              <div class="inline-flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full bg-primary-500 animate-pulse"></div>
+                等待接收方输入连接码...
+              </div>
+            </div>
+
+            <div class="bg-slate-50 rounded-2xl p-6 border border-slate-200">
+              <p class="text-xs text-slate-400 mb-3 text-center">接收方确认后，输入返回的6位确认码</p>
+              <input type="text" id="answerCodeInput" maxlength="6" placeholder="------" class="code-input w-full bg-transparent text-slate-700 outline-none mb-4" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+              <button onclick="acceptAnswer()" class="w-full py-3 rounded-xl btn-primary text-white font-medium">
+                <i class="fas fa-link mr-2"></i>
+                建立连接
+              </button>
+            </div>
+          </div>
+
+          <div id="connectingState" class="hidden text-center py-8">
+            <div class="inline-block w-12 h-12 border-4 border-primary-500/20 border-t-primary-500 rounded-full animate-spin mb-4"></div>
+            <p class="text-slate-500">正在建立点对点连接...</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="sendInterface" class="hidden max-w-4xl mx-auto">
+        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
+              <i class="fas fa-check text-green-500"></i>
+            </div>
+            <div>
+              <p class="text-sm font-medium text-slate-700">已连接到接收方</p>
+              <p class="text-xs text-slate-400">点对点加密连接已建立</p>
+            </div>
+          </div>
+          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
+            <i class="fas fa-xmark mr-1"></i>
+            断开
+          </button>
+        </div>
+
+        <div class="flex gap-2 mb-6 overflow-x-auto hide-scrollbar">
+          <button onclick="switchContentType('files')" id="filesTab" class="tab-active whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2">
+            <i class="fas fa-file"></i>
+            <span>文件</span>
+          </button>
+          <button onclick="switchContentType('text')" id="textTab" class="whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
+            <i class="fas fa-font"></i>
+            <span>文本</span>
+          </button>
+          <button onclick="switchContentType('clipboard')" id="clipboardTab" class="whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
+            <i class="fas fa-clipboard"></i>
+            <span>剪贴板</span>
+          </button>
+        </div>
+
+        <div id="fileSendArea">
+          <div id="dropZone" class="drop-zone rounded-3xl p-12 text-center cursor-pointer mb-6" onclick="document.getElementById('fileInput').click()">
+            <div class="w-20 h-20 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center animate-float">
+              <i class="fas fa-cloud-arrow-up text-3xl text-primary-500"></i>
+            </div>
+            <h3 class="text-xl font-semibold mb-2 text-slate-700">拖放文件到此处</h3>
+            <p class="text-slate-400 text-sm mb-4">或点击选择文件 · 支持所有文件类型</p>
+            <div class="flex flex-wrap justify-center gap-2 text-xs text-slate-400">
+              <span class="px-3 py-1 rounded-full glass">.psd</span>
+              <span class="px-3 py-1 rounded-full glass">.ai</span>
+              <span class="px-3 py-1 rounded-full glass">.cdr</span>
+              <span class="px-3 py-1 rounded-full glass">.pdf</span>
+              <span class="px-3 py-1 rounded-full glass">.tif</span>
+              <span class="px-3 py-1 rounded-full glass">.exe</span>
+              <span class="px-3 py-1 rounded-full glass">所有格式</span>
+            </div>
+            <input type="file" id="fileInput" multiple class="hidden">
+          </div>
+          <div id="fileQueue" class="space-y-3"></div>
+        </div>
+
+        <div id="textSendArea" class="hidden">
+          <div class="glass-strong rounded-3xl p-6">
+            <textarea id="textToSend" placeholder="输入要发送的文本内容..." class="w-full h-40 bg-slate-50 rounded-2xl p-4 text-sm outline-none border border-slate-200 focus:border-primary-500/50 transition-all text-slate-700"></textarea>
+            <button onclick="sendText()" class="mt-4 px-6 py-3 rounded-xl btn-primary text-white font-medium">
+              <i class="fas fa-paper-plane mr-2"></i>
+              发送文本
+            </button>
+          </div>
+        </div>
+
+        <div id="clipboardSendArea" class="hidden">
+          <div class="glass-strong rounded-3xl p-6 text-center">
+            <div class="w-16 h-16 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center">
+              <i class="fas fa-clipboard text-2xl text-primary-500"></i>
+            </div>
+            <h3 class="text-lg font-semibold mb-2 text-slate-700">发送剪贴板内容</h3>
+            <p class="text-slate-400 text-sm mb-4">快速分享您当前复制的文本内容</p>
+            <button onclick="sendClipboard()" class="px-6 py-3 rounded-xl btn-primary text-white font-medium">
+              <i class="fas fa-paste mr-2"></i>
+              读取并发送剪贴板
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Receive Mode -->
+    <div id="receiveMode" class="hidden animate-fade-in">
+      <div id="receiveSetup" class="max-w-2xl mx-auto">
+        <div class="glass-strong rounded-3xl p-8">
+          <div class="text-center mb-6">
+            <div class="pulse-wrapper inline-block mb-4">
+              <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center relative z-10">
+                <i class="fas fa-download text-3xl text-accent-500"></i>
+              </div>
+              <div class="pulse-ring" style="border-color: rgba(6, 182, 212, 0.4);"></div>
+            </div>
+            <h3 class="text-xl font-semibold mb-2 text-slate-800">接收文件</h3>
+            <p class="text-slate-400 text-sm">输入发送方提供的6位连接码，建立接收连接</p>
+          </div>
+
+          <div class="bg-slate-50 rounded-2xl p-6 mb-4 border border-slate-200">
+            <p class="text-xs text-slate-400 mb-3 text-center">输入发送方的6位连接码</p>
+            <input type="text" id="offerCodeInput" maxlength="6" placeholder="------" class="code-input w-full bg-transparent text-slate-700 outline-none mb-4" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+          </div>
+
+          <button onclick="generateAnswer()" class="w-full py-4 rounded-2xl btn-primary text-white font-medium text-lg shadow-lg">
+            <i class="fas fa-link mr-2"></i>
+            生成确认码
+          </button>
+
+          <div id="shareAnswerStep" class="hidden mt-6">
+            <div class="bg-slate-50 rounded-2xl p-6 border border-slate-200">
+              <p class="text-xs text-slate-400 mb-3 text-center">将此6位确认码发回给发送方</p>
+              <div class="flex items-center justify-center gap-2">
+                <div id="answerCodeDisplay" class="code-display text-4xl font-bold gradient-text tracking-widest">
+                  ------
+                </div>
+                <button onclick="copyAnswerCode()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
+                  <i class="fas fa-copy text-slate-500"></i>
+                </button>
+              </div>
+            </div>
+            <div class="text-center text-slate-400 text-sm mt-4">
+              <div class="inline-flex items-center gap-2">
+                <div class="w-2 h-2 rounded-full bg-accent-500 animate-pulse"></div>
+                等待发送方确认连接...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="receiveInterface" class="hidden max-w-4xl mx-auto">
+        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
+              <i class="fas fa-check text-green-500"></i>
+            </div>
+            <div>
+              <p class="text-sm font-medium text-slate-700">已连接到发送方</p>
+              <p class="text-xs text-slate-400">准备接收文件</p>
+            </div>
+          </div>
+          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
+            <i class="fas fa-xmark mr-1"></i>
+            断开
+          </button>
+        </div>
+
+        <div id="waitingState" class="glass-strong rounded-3xl p-12 text-center">
+          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center animate-float">
+            <i class="fas fa-hourglass-half text-3xl text-accent-500"></i>
+          </div>
+          <h3 class="text-xl font-semibold mb-2 text-slate-700">等待接收文件</h3>
+          <p class="text-slate-400 text-sm">发送方可以开始传输文件了</p>
+        </div>
+
+        <div id="receivedFiles" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- Features Section -->
+    <div id="featuresSection" class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+        <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center mb-4">
+          <i class="fas fa-globe text-primary-500 text-xl"></i>
+        </div>
+        <h4 class="font-semibold mb-2 text-slate-700">跨网络传输</h4>
+        <p class="text-slate-400 text-sm">支持不同网络环境下的文件传输，深圳到上海，随时随地</p>
+      </div>
+      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+        <div class="w-12 h-12 rounded-xl bg-accent-500/15 flex items-center justify-center mb-4">
+          <i class="fas fa-shield-halved text-accent-500 text-xl"></i>
+        </div>
+        <h4 class="font-semibold mb-2 text-slate-700">端到端加密</h4>
+        <p class="text-slate-400 text-sm">基于 WebRTC 点对点技术，数据不经过第三方服务器</p>
+      </div>
+      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+        <div class="w-12 h-12 rounded-xl bg-purple-500/15 flex items-center justify-center mb-4">
+          <i class="fas fa-users text-purple-500 text-xl"></i>
+        </div>
+        <h4 class="font-semibold mb-2 text-slate-700">好友快捷传输</h4>
+        <p class="text-slate-400 text-sm">添加常用设备为好友，后续传输一键直达</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="glass-strong border-t border-slate-200/50 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+        <p class="text-slate-400 text-sm">© 2024 EasyDrop · 基于 WebRTC 技术</p>
+        <div class="flex items-center gap-6 text-sm text-slate-400">
+          <span class="flex items-center gap-2">
+            <i class="fas fa-circle text-green-500 text-xs"></i>
+            服务正常运行
+          </span>
+          <span>无文件大小限制</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
+    <div class="flex items-center justify-between mb-6">
+      <h3 class="text-lg font-semibold text-slate-800">设置</h3>
+      <button onclick="toggleSettings()" class="w-8 h-8 rounded-lg glass hover:bg-slate-100 flex items-center justify-center">
+        <i class="fas fa-xmark text-slate-500"></i>
+      </button>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label class="text-sm text-slate-500 mb-2 block">设备名称</label>
+        <input type="text" id="deviceName" value="我的设备" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+      </div>
+      <div>
+        <label class="text-sm text-slate-500 mb-2 block">STUN 服务器（用于跨网络连接）</label>
+        <input type="text" id="stunServer" value="stun:stun.l.google.com:19302" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 code-display text-slate-700">
+        <p class="text-xs text-slate-400 mt-1">用于 NAT 穿透，支持不同网络环境下的连接</p>
+      </div>
+      <div>
+        <label class="text-sm text-slate-500 mb-2 block">下载目录</label>
+        <div class="flex items-center gap-2">
+          <input type="text" value="浏览器默认下载" disabled class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 text-slate-400">
+          <button class="px-4 py-3 rounded-xl glass text-sm text-slate-400" disabled>更改</button>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">文件将保存到浏览器默认下载目录</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Friend Action Modal -->
+<div id="friendActionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
+    <div class="flex items-center justify-between mb-6">
+      <h3 class="text-lg font-semibold text-slate-800" id="friendModalTitle">好友操作</h3>
+      <button onclick="closeFriendModal()" class="w-8 h-8 rounded-lg glass hover:bg-slate-100 flex items-center justify-center">
+        <i class="fas fa-xmark text-slate-500"></i>
+      </button>
+    </div>
+    <div id="friendModalContent">
+      <!-- Content will be dynamically inserted -->
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3"></div>
+
+<script>
+// ==================== Global State ====================
+let peer = null;
+let peerConnection = null;
+let dataChannel = null;
+let connected = false;
+let isInitiator = false;
+let currentTab = 'friends';
+let currentContentType = 'files';
+let fileQueue = [];
+let receivedFiles = [];
+let transferStats = { sent: 0, received: 0 };
+let receivedBuffer = [];
+let receivedSize = 0;
+let expectedFileSize = 0;
+let receivedFileName = '';
+let receivedFileType = '';
+let sessionCode = null;
+let answerCode = null;
+let codeTimer = null;
+let codeExpiry = 300;
+let currentFriendId = null;
+let friends = [];
+
+// Avatar color combinations
+const avatarColors = [
+  ['#6366f1', '#06b6d4'],
+  ['#8b5cf6', '#ec4899'],
+  ['#10b981', '#06b6d4'],
+  ['#f59e0b', '#ef4444'],
+  ['#3b82f6', '#8b5cf6'],
+  ['#ec4899', '#f59e0b'],
+];
+
+// ==================== WebRTC Support Check ====================
+function checkWebRTCSupport() {
+  return !!(window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection);
+}
+
+// ==================== Friends Management ====================
+function loadFriends() {
+  try {
+    const stored = localStorage.getItem('easydrop_friends');
+    friends = stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    friends = [];
+  }
+}
+
+function saveFriends() {
+  try {
+    localStorage.setItem('easydrop_friends', JSON.stringify(friends));
+  } catch (e) {
+    console.warn('Cannot save friends:', e);
+  }
+}
+
+function addFriend(name, deviceId) {
+  const colorIndex = friends.length % avatarColors.length;
+  const friend = {
+    id: deviceId || Date.now().toString(),
+    name: name || '未知设备',
+    addedAt: new Date().toISOString(),
+    lastTransfer: null,
+    transferCount: 0,
+    avatarColors: avatarColors[colorIndex]
+  };
+  friends.push(friend);
+  saveFriends();
+  renderFriendsList();
+  return friend;
+}
+
+function removeFriend(friendId) {
+  friends = friends.filter(f => f.id !== friendId);
+  saveFriends();
+  renderFriendsList();
+  showToast('好友已删除', 'info');
+}
+
+function updateFriendTransferStats(friendId) {
+  const friend = friends.find(f => f.id === friendId);
+  if (friend) {
+    friend.lastTransfer = new Date().toISOString();
+    friend.transferCount = (friend.transferCount || 0) + 1;
+    saveFriends();
+    renderFriendsList();
+  }
+}
+
+function renameFriend(friendId, newName) {
+  const friend = friends.find(f => f.id === friendId);
+  if (friend) {
+    friend.name = newName;
+    saveFriends();
+    renderFriendsList();
+    showToast('好友名称已更新', 'success');
+  }
+}
+
+function renderFriendsList() {
+  const container = document.getElementById('friendsList');
+  const emptyState = document.getElementById('friendsEmptyState');
+  
+  if (friends.length === 0) {
+    container.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    return;
+  }
+  
+  emptyState.classList.add('hidden');
+  container.innerHTML = '';
+  
+  friends.forEach(friend => {
+    const colors = friend.avatarColors || avatarColors[0];
+    const initials = friend.name.charAt(0).toUpperCase();
+    const lastTransferText = friend.lastTransfer 
+      ? `上次传输: ${formatDate(friend.lastTransfer)}`
+      : '尚未传输过文件';
+    
+    const card = document.createElement('div');
+    card.className = 'friend-card glass rounded-2xl p-5 cursor-pointer';
+    card.onclick = () => showFriendActions(friend.id);
+    card.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="friend-avatar w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+          ${initials}
+        </div>
+        <div class="flex-1 min-w-0">
+          <h4 class="font-semibold text-slate-800 truncate">${friend.name}</h4>
+          <p class="text-xs text-slate-400 mt-1">${lastTransferText}</p>
+          <div class="flex items-center gap-3 mt-2">
+            <span class="text-xs text-slate-400">
+              <i class="fas fa-exchange-alt mr-1"></i>
+              ${friend.transferCount || 0} 次传输
+            </span>
+          </div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button onclick="event.stopPropagation(); connectToFriend('${friend.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all">
+            <i class="fas fa-bolt text-primary-500"></i>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diff = now - date;
+  
+  if (diff < 60000) return '刚刚';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}天前`;
+  return date.toLocaleDateString('zh-CN');
+}
+
+function showFriendActions(friendId) {
+  const friend = friends.find(f => f.id === friendId);
+  if (!friend) return;
+  
+  currentFriendId = friendId;
+  const modal = document.getElementById('friendActionModal');
+  const title = document.getElementById('friendModalTitle');
+  const content = document.getElementById('friendModalContent');
+  
+  title.textContent = friend.name;
+  
+  const colors = friend.avatarColors || avatarColors[0];
+  const initials = friend.name.charAt(0).toUpperCase();
+  
+  content.innerHTML = `
+    <div class="text-center mb-6">
+      <div class="friend-avatar w-20 h-20 rounded-2xl flex items-center justify-center text-white text-3xl font-bold mx-auto mb-3" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+        ${initials}
+      </div>
+      <h4 class="font-semibold text-slate-800">${friend.name}</h4>
+      <p class="text-sm text-slate-400 mt-1">添加于 ${formatDate(friend.addedAt)}</p>
+    </div>
+    
+    <div class="space-y-3">
+      <button onclick="connectToFriend('${friend.id}')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-bolt"></i>
+        发起文件传输
+      </button>
+      
+      <button onclick="showRenameForm('${friend.id}')" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-pen"></i>
+        重命名
+      </button>
+      
+      <button onclick="confirmRemoveFriend('${friend.id}')" class="w-full py-3 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-trash"></i>
+        删除好友
+      </button>
+    </div>
+  `;
+  
+  modal.classList.remove('hidden');
+}
+
+function showRenameForm(friendId) {
+  const friend = friends.find(f => f.id === friendId);
+  if (!friend) return;
+  
+  const content = document.getElementById('friendModalContent');
+  content.innerHTML = `
+    <div class="mb-4">
+      <label class="text-sm text-slate-500 mb-2 block">输入新的名称</label>
+      <input type="text" id="renameInput" value="${friend.name}" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700" autofocus>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="closeFriendModal()" class="flex-1 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium">
+        取消
+      </button>
+      <button onclick="executeRename('${friendId}')" class="flex-1 py-3 rounded-xl btn-primary text-white font-medium">
+        确认
+      </button>
+    </div>
+  `;
+  
+  setTimeout(() => {
+    const input = document.getElementById('renameInput');
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }, 100);
+}
+
+function executeRename(friendId) {
+  const newName = document.getElementById('renameInput').value.trim();
+  if (newName) {
+    renameFriend(friendId, newName);
+    closeFriendModal();
+  }
+}
+
+function confirmRemoveFriend(friendId) {
+  const friend = friends.find(f => f.id === friendId);
+  if (!friend) return;
+  
+  const content = document.getElementById('friendModalContent');
+  content.innerHTML = `
+    <div class="text-center mb-6">
+      <div class="w-16 h-16 rounded-2xl bg-red-500/15 flex items-center justify-center mx-auto mb-4">
+        <i class="fas fa-exclamation-triangle text-2xl text-red-500"></i>
+      </div>
+      <h4 class="font-semibold text-slate-800 mb-2">确认删除好友？</h4>
+      <p class="text-sm text-slate-400">删除后无法恢复，传输记录也将被清除</p>
+    </div>
+    <div class="flex gap-3">
+      <button onclick="closeFriendModal()" class="flex-1 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium">
+        取消
+      </button>
+      <button onclick="removeFriend('${friendId}'); closeFriendModal();" class="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-medium">
+        删除
+      </button>
+    </div>
+  `;
+}
+
+function closeFriendModal() {
+  document.getElementById('friendActionModal').classList.add('hidden');
+  currentFriendId = null;
+}
+
+function connectToFriend(friendId) {
+  const friend = friends.find(f => f.id === friendId);
+  if (!friend) return;
+  
+  closeFriendModal();
+  
+  // Switch to send mode and pre-fill the connection name
+  switchTab('send');
+  document.getElementById('connectionName').value = friend.name;
+  
+  showToast(`正在为 ${friend.name} 创建连接...`, 'info');
+}
+
+// ==================== Tab Switching ====================
+function switchTab(tab) {
+  currentTab = tab;
+  
+  ['friends', 'send', 'receive'].forEach(t => {
+    const tabBtn = document.getElementById(t + 'Tab');
+    const mode = document.getElementById(t + 'Mode');
+    if (t === tab) {
+      tabBtn.classList.add('tab-active');
+      tabBtn.classList.remove('text-slate-400');
+      mode.classList.remove('hidden');
+    } else {
+      tabBtn.classList.remove('tab-active');
+      tabBtn.classList.add('text-slate-400');
+      mode.classList.add('hidden');
+    }
+  });
+
+  if (connected) {
+    document.getElementById('featuresSection').classList.add('hidden');
+  } else {
+    document.getElementById('featuresSection').classList.remove('hidden');
+  }
+}
+
+function switchContentType(type) {
+  currentContentType = type;
+  ['files', 'text', 'clipboard'].forEach(t => {
+    const tab = document.getElementById(t + 'Tab');
+    const area = document.getElementById(t + 'SendArea');
+    if (t === type) {
+      tab.classList.add('tab-active');
+      tab.classList.remove('text-slate-400');
+      area.classList.remove('hidden');
+    } else {
+      tab.classList.remove('tab-active');
+      tab.classList.add('text-slate-400');
+      area.classList.add('hidden');
+    }
+  });
+}
+
+// ==================== 6-Digit Code Generation ====================
+function generate6DigitCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function startCodeTimer() {
+  codeExpiry = 300;
+  updateTimerDisplay();
+  
+  if (codeTimer) clearInterval(codeTimer);
+  
+  codeTimer = setInterval(() => {
+    codeExpiry--;
+    updateTimerDisplay();
+    
+    if (codeExpiry <= 0) {
+      clearInterval(codeTimer);
+      showToast('连接码已过期，请重新生成', 'warning');
+      resetConnection();
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const minutes = Math.floor(codeExpiry / 60);
+  const seconds = codeExpiry % 60;
+  const timerEl = document.getElementById('codeTimer');
+  if (timerEl) {
+    timerEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+}
+
+// ==================== PeerJS Configuration ====================
+function initializePeer() {
+  // Use PeerJS public server (free)
+  peer = new Peer({
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+      ]
+    }
+  });
+
+  peer.on('open', (id) => {
+    console.log('PeerJS connected, ID:', id);
+    updateConnectionStatus(false);
+  });
+
+  peer.on('connection', (conn) => {
+    // Receiver: received connection request from sender
+    setupConnection(conn);
+  });
+
+  peer.on('error', (err) => {
+    console.error('PeerJS error:', err);
+    showToast('Connection error: ' + err.type, 'error');
+    
+    if (err.type === 'peer-unavailable') {
+      showToast('Connection code invalid or peer disconnected', 'error');
+    }
+  });
+}
+
+// ==================== Sender: Create Connection ====================
+async function generateOffer() {
+  isInitiator = true;
+  document.getElementById('generateCodeStep').classList.add('hidden');
+  document.getElementById('connectingState').classList.remove('hidden');
+
+  try {
+    // Generate 6-digit code
+    sessionCode = generate6DigitCode();
+    
+    // Use connection code as Peer ID
+    // Need to destroy current peer first and reconnect with new ID
+    if (peer) {
+      peer.destroy();
+    }
+    
+    peer = new Peer('easydrop_' + sessionCode, {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+        ]
+      }
+    });
+
+    peer.on('open', (id) => {
+      console.log('Sender Peer ready, ID:', id);
+      
+      // Display connection code
+      document.getElementById('codeDisplay').textContent = sessionCode;
+      document.getElementById('offerCode').value = id;
+      
+      document.getElementById('connectingState').classList.add('hidden');
+      document.getElementById('shareCodeStep').classList.remove('hidden');
+      
+      startCodeTimer();
+      showToast('Connection code generated: ' + sessionCode, 'success');
+    });
+
+    peer.on('connection', (conn) => {
+      setupConnection(conn);
+    });
+
+    peer.on('error', (err) => {
+      console.error('PeerJS error:', err);
+      if (err.type === 'unavailable-id') {
+        showToast('Connection code already in use, please regenerate', 'warning');
+        resetConnection();
+      }
+    });
+
+  } catch (error) {
+    console.error('Error generating offer:', error);
+    showToast('Failed to generate code: ' + error.message, 'error');
+    resetConnection();
+  }
+}
+
+// ==================== Receiver: Enter Connection Code ====================
+async function generateAnswer() {
+  const inputCode = document.getElementById('offerCodeInput').value.trim();
+  if (!inputCode || inputCode.length !== 6) {
+    showToast('Please enter 6-digit code', 'warning');
+    return;
+  }
+
+  isInitiator = false;
+  sessionCode = inputCode;
+
+  try {
+    document.getElementById('receiveSetup').classList.add('hidden');
+    
+    // Show waiting state
+    const waitingDiv = document.createElement('div');
+    waitingDiv.id = 'connectingState';
+    waitingDiv.className = 'text-center py-8';
+    waitingDiv.innerHTML = `
+      <div class="inline-block w-12 h-12 border-4 border-primary-500/20 border-t-primary-500 rounded-full animate-spin mb-4"></div>
+      <p class="text-slate-500">Connecting to sender...</p>
+    `;
+    document.getElementById('receiveSetup').parentNode.appendChild(waitingDiv);
+
+    // Connect to sender
+    const conn = peer.connect('easydrop_' + inputCode, {
+      reliable: true
+    });
+
+    conn.on('open', () => {
+      console.log('Connected to sender');
+      setupConnection(conn);
+    });
+
+    conn.on('error', (err) => {
+      console.error('Connection error:', err);
+      showToast('Connection failed, please check code', 'error');
+      document.getElementById('connectingState')?.remove();
+      document.getElementById('receiveSetup').classList.remove('hidden');
+    });
+
+  } catch (error) {
+    console.error('Error connecting:', error);
+    showToast('Connection failed: ' + error.message, 'error');
+  }
+}
+
+// ==================== Setup Data Channel ====================
+function setupConnection(conn) {
+  dataChannel = conn;
+  connected = true;
+  
+  if (codeTimer) clearInterval(codeTimer);
+  
+  conn.on('open', () => {
+    updateConnectionStatus(true);
+    
+    if (isInitiator) {
+      document.getElementById('sendSetup').classList.add('hidden');
+      document.getElementById('sendInterface').classList.remove('hidden');
+    } else {
+      document.getElementById('connectingState')?.remove();
+      document.getElementById('receiveSetup').classList.add('hidden');
+      document.getElementById('receiveInterface').classList.remove('hidden');
+    }
+    
+    document.getElementById('featuresSection').classList.add('hidden');
+    document.getElementById('heroSection').classList.add('hidden');
+    showToast('Connection established', 'success');
+    
+    // Prompt to add friend
+    setTimeout(() => {
+      if (isInitiator) {
+        promptAddFriend();
+      }
+    }, 1000);
+  });
+
+  conn.on('data', (data) => {
+    if (typeof data === 'string') {
+      handleMetadata(JSON.parse(data));
+    } else {
+      handleFileData(data);
+    }
+  });
+
+  conn.on('close', () => {
+    connected = false;
+    updateConnectionStatus(false);
+    showToast('Connection disconnected', 'warning');
+    resetConnection();
+  });
+
+  conn.on('error', (err) => {
+    console.error('Data channel error:', err);
+    showToast('Transfer error', 'error');
+  });
+}
+
+// ==================== Prompt Add Friend ====================
+function promptAddFriend() {
+  const connectionName = document.getElementById('connectionName').value.trim();
+  
+  // Check if this connection name already exists in friends
+  const existingFriend = friends.find(f => f.name === connectionName);
+  
+  if (!existingFriend && connectionName) {
+    // Show add friend prompt
+    const modal = document.getElementById('friendActionModal');
+    const title = document.getElementById('friendModalTitle');
+    const content = document.getElementById('friendModalContent');
+    
+    title.textContent = '添加好友';
+    
+    content.innerHTML = `
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 rounded-2xl bg-green-500/15 flex items-center justify-center mx-auto mb-4">
+          <i class="fas fa-user-plus text-2xl text-green-500"></i>
+        </div>
+        <h4 class="font-semibold text-slate-800 mb-2">连接成功！</h4>
+        <p class="text-sm text-slate-400">是否将"${connectionName}"添加为好友？</p>
+        <p class="text-xs text-slate-400 mt-2">添加后可直接发起传输，无需重复输入连接码</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="closeFriendModal()" class="flex-1 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium">
+          以后再说
+        </button>
+        <button onclick="confirmAddFriend('${connectionName}')" class="flex-1 py-3 rounded-xl btn-primary text-white font-medium">
+          添加好友
+        </button>
+      </div>
+    `;
+    
+    modal.classList.remove('hidden');
+  } else if (existingFriend) {
+    // Update transfer stats for existing friend
+    updateFriendTransferStats(existingFriend.id);
+  }
+}
+
+function confirmAddFriend(name) {
+  const friend = addFriend(name);
+  closeFriendModal();
+  showToast(`已添加 ${name} 为好友`, 'success');
+}
+
+// ==================== File Handling ====================
+function setupFileInput() {
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+
+  fileInput.addEventListener('change', (e) => {
+    handleFiles(e.target.files);
+  });
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    handleFiles(e.dataTransfer.files);
+  });
+}
+
+function handleFiles(files) {
+  Array.from(files).forEach(file => {
+    const fileItem = {
+      id: Date.now() + Math.random(),
+      file: file,
+      name: file.name,
+      size: file.size,
+      type: file.type || getFileType(file.name),
+      progress: 0,
+      status: 'pending'
+    };
+    fileQueue.push(fileItem);
+    renderFileQueue();
+  });
+}
+
+function getFileType(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  const typeMap = {
+    'psd': 'image/vnd.adobe.photoshop',
+    'ai': 'application/postscript',
+    'cdr': 'application/cdr',
+    'pdf': 'application/pdf',
+    'tif': 'image/tiff',
+    'tiff': 'image/tiff',
+    'exe': 'application/x-msdownload',
+    'zip': 'application/zip',
+    'rar': 'application/x-rar-compressed',
+    '7z': 'application/x-7z-compressed',
+  };
+  return typeMap[ext] || 'application/octet-stream';
+}
+
+function getFileIcon(filename, type) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (type.startsWith('image/')) return { icon: 'fa-image', color: 'text-green-500', bg: 'bg-green-500/15' };
+  if (type.startsWith('video/')) return { icon: 'fa-film', color: 'text-purple-500', bg: 'bg-purple-500/15' };
+  if (type.startsWith('audio/')) return { icon: 'fa-music', color: 'text-pink-500', bg: 'bg-pink-500/15' };
+  if (ext === 'pdf') return { icon: 'fa-file-pdf', color: 'text-red-500', bg: 'bg-red-500/15' };
+  if (ext === 'psd' || ext === 'ai' || ext === 'cdr' || ext === 'tif') return { icon: 'fa-palette', color: 'text-blue-500', bg: 'bg-blue-500/15' };
+  if (ext === 'exe') return { icon: 'fa-gear', color: 'text-yellow-500', bg: 'bg-yellow-500/15' };
+  if (['zip', 'rar', '7z'].includes(ext)) return { icon: 'fa-file-zipper', color: 'text-orange-500', bg: 'bg-orange-500/15' };
+  if (['doc', 'docx'].includes(ext)) return { icon: 'fa-file-word', color: 'text-blue-500', bg: 'bg-blue-500/15' };
+  if (['xls', 'xlsx'].includes(ext)) return { icon: 'fa-file-excel', color: 'text-green-500', bg: 'bg-green-500/15' };
+  if (['ppt', 'pptx'].includes(ext)) return { icon: 'fa-file-powerpoint', color: 'text-orange-500', bg: 'bg-orange-500/15' };
+  if (['txt', 'md'].includes(ext)) return { icon: 'fa-file-lines', color: 'text-slate-500', bg: 'bg-slate-500/15' };
+  return { icon: 'fa-file', color: 'text-slate-500', bg: 'bg-slate-500/15' };
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function renderFileQueue() {
+  const queue = document.getElementById('fileQueue');
+  queue.innerHTML = '';
+
+  fileQueue.forEach(item => {
+    const iconInfo = getFileIcon(item.name, item.type);
+    const progress = item.progress || 0;
+    const statusText = item.status === 'sending' ? '传输中...' : item.status === 'sent' ? '已发送' : '等待中';
+    const statusColor = item.status === 'sent' ? 'text-green-500' : item.status === 'sending' ? 'text-primary-500' : 'text-slate-400';
+
+    const fileElement = document.createElement('div');
+    fileElement.className = 'glass rounded-2xl p-4 animate-slide-up';
+    fileElement.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
+          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-sm font-medium truncate text-slate-700">${item.name}</p>
+            <span class="text-xs ${statusColor} ml-2">${statusText}</span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>${formatFileSize(item.size)}</span>
+            <span>${progress}%</span>
+          </div>
+          <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
+            <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
+          </div>
+        </div>
+        ${item.status === 'pending' ? `
+          <button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0">
+            <i class="fas fa-paper-plane text-primary-500 text-sm"></i>
+          </button>
+        ` : item.status === 'sent' ? `
+          <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-check text-green-500 text-sm"></i>
+          </div>
+        ` : `
+          <div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+            <div class="w-4 h-4 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
+          </div>
+        `}
+      </div>
+    `;
+    queue.appendChild(fileElement);
+  });
+}
+
+// ==================== Send File ====================
+async function sendFile(fileId) {
+  const item = fileQueue.find(f => f.id == fileId);
+  if (!item || !dataChannel || !dataChannel.open) {
+    showToast('连接未就绪', 'error');
+    return;
+  }
+
+  item.status = 'sending';
+  renderFileQueue();
+
+  try {
+    const metadata = {
+      type: 'file-metadata',
+      name: item.file.name,
+      size: item.file.size,
+      fileType: item.file.type || getFileType(item.file.name)
+    };
+    dataChannel.send(JSON.stringify(metadata));
+
+    const chunkSize = 16384;
+    const file = item.file;
+    let offset = 0;
+
+    while (offset < file.size) {
+      const slice = file.slice(offset, offset + chunkSize);
+      const buffer = await slice.arrayBuffer();
+
+      while (dataChannel.bufferSize > 4 * 1024 * 1024) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      dataChannel.send(buffer);
+      offset += buffer.byteLength;
+
+      item.progress = Math.round((offset / file.size) * 100);
+      transferStats.sent += buffer.byteLength;
+      renderFileQueue();
+    }
+
+    dataChannel.send(JSON.stringify({ type: 'file-complete' }));
+
+    item.status = 'sent';
+    item.progress = 100;
+    renderFileQueue();
+    showToast(`文件 "${item.name}" 已发送`, 'success');
+    
+    // Update friend transfer stats
+    const connectionName = document.getElementById('connectionName').value.trim();
+    const friend = friends.find(f => f.name === connectionName);
+    if (friend) {
+      updateFriendTransferStats(friend.id);
+    }
+  } catch (error) {
+    console.error('Error sending file:', error);
+    item.status = 'pending';
+    renderFileQueue();
+    showToast('发送失败', 'error');
+  }
+}
+
+// ==================== Send Text ====================
+function sendText() {
+  const text = document.getElementById('textToSend').value.trim();
+  if (!text) {
+    showToast('请输入文本内容', 'warning');
+    return;
+  }
+  if (!dataChannel || !dataChannel.open) {
+    showToast('连接未就绪', 'error');
+    return;
+  }
+
+  const metadata = {
+    type: 'text-message',
+    content: text
+  };
+  dataChannel.send(JSON.stringify(metadata));
+  document.getElementById('textToSend').value = '';
+  showToast('文本已发送', 'success');
+}
+
+// ==================== Send Clipboard ====================
+async function sendClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) {
+      showToast('剪贴板为空', 'warning');
+      return;
+    }
+    const metadata = {
+      type: 'clipboard-content',
+      content: text
+    };
+    dataChannel.send(JSON.stringify(metadata));
+    showToast('剪贴板内容已发送', 'success');
+  } catch (error) {
+    showToast('无法读取剪贴板', 'error');
+  }
+}
+
+// ==================== Receive Data ====================
+function handleMetadata(data) {
+  if (data.type === 'file-metadata') {
+    receivedBuffer = [];
+    receivedSize = 0;
+    expectedFileSize = data.size;
+    receivedFileName = data.name;
+    receivedFileType = data.fileType;
+
+    document.getElementById('waitingState').classList.add('hidden');
+
+    const item = {
+      id: Date.now(),
+      name: data.name,
+      size: data.size,
+      type: data.fileType,
+      progress: 0,
+      status: 'receiving',
+      blob: null
+    };
+    receivedFiles.push(item);
+    renderReceivedFiles();
+  } else if (data.type === 'file-complete') {
+    const item = receivedFiles[receivedFiles.length - 1];
+    if (item) {
+      const blob = new Blob(receivedBuffer, { type: item.type });
+      item.blob = blob;
+      item.status = 'received';
+      item.progress = 100;
+      renderReceivedFiles();
+      downloadFile(blob, item.name);
+      showToast(`文件 "${item.name}" 已接收`, 'success');
+    }
+    receivedBuffer = [];
+    receivedSize = 0;
+  } else if (data.type === 'text-message') {
+    showReceivedText(data.content, '文本消息');
+  } else if (data.type === 'clipboard-content') {
+    showReceivedText(data.content, '剪贴板内容');
+  }
+}
+
+function handleFileData(buffer) {
+  receivedBuffer.push(buffer);
+  receivedSize += buffer.byteLength;
+
+  const item = receivedFiles[receivedFiles.length - 1];
+  if (item && expectedFileSize > 0) {
+    item.progress = Math.round((receivedSize / expectedFileSize) * 100);
+    renderReceivedFiles();
+  }
+}
+
+function renderReceivedFiles() {
+  const container = document.getElementById('receivedFiles');
+  container.innerHTML = '';
+
+  receivedFiles.forEach(item => {
+    const iconInfo = getFileIcon(item.name, item.type);
+    const progress = item.progress || 0;
+    const statusText = item.status === 'received' ? '已接收' : '接收中...';
+    const statusColor = item.status === 'received' ? 'text-green-500' : 'text-accent-500';
+
+    const fileElement = document.createElement('div');
+    fileElement.className = 'glass rounded-2xl p-4 animate-slide-up';
+    fileElement.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
+          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-sm font-medium truncate text-slate-700">${item.name}</p>
+            <span class="text-xs ${statusColor} ml-2">${statusText}</span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span>${formatFileSize(item.size)}</span>
+            <span>${progress}%</span>
+          </div>
+          <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
+            <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
+          </div>
+        </div>
+        ${item.status === 'received' ? `
+          <button onclick="downloadReceivedFile('${item.id}')" class="w-10 h-10 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0">
+            <i class="fas fa-download text-accent-500 text-sm"></i>
+          </button>
+        ` : `
+          <div class="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center flex-shrink-0">
+            <div class="w-4 h-4 border-2 border-accent-500/30 border-t-accent-500 rounded-full animate-spin"></div>
+          </div>
+        `}
+      </div>
+    `;
+    container.appendChild(fileElement);
+  });
+}
+
+function downloadReceivedFile(itemId) {
+  const item = receivedFiles.find(f => f.id == itemId);
+  if (item && item.blob) {
+    downloadFile(item.blob, item.name);
+  }
+}
+
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function showReceivedText(content, label) {
+  document.getElementById('waitingState').classList.add('hidden');
+
+  const container = document.getElementById('receivedFiles');
+  const textElement = document.createElement('div');
+  textElement.className = 'glass rounded-2xl p-4 animate-slide-up';
+  textElement.innerHTML = `
+    <div class="flex items-start gap-4">
+      <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+        <i class="fas fa-font text-primary-500 text-lg"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-sm font-medium text-slate-700">${label}</p>
+          <button onclick="copyTextToClipboard(this)" data-text="${content.replace(/"/g, '&quot;')}" class="text-xs text-slate-400 hover:text-primary-500 transition-all">
+            <i class="fas fa-copy mr-1"></i>复制
+          </button>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3 text-sm text-slate-600 max-h-32 overflow-y-auto whitespace-pre-wrap break-all">${content}</div>
+      </div>
+    </div>
+  `;
+  container.prepend(textElement);
+  showToast(`收到${label}`, 'success');
+}
+
+function copyTextToClipboard(button) {
+  const text = button.dataset.text;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板', 'success');
+  });
+}
+
+// ==================== Connection Management ====================
+function disconnect() {
+  if (dataChannel) {
+    dataChannel.close();
+  }
+  resetConnection();
+  showToast('已断开连接', 'info');
+}
+
+function resetConnection() {
+  if (codeTimer) clearInterval(codeTimer);
+  
+  connected = false;
+  isInitiator = false;
+  fileQueue = [];
+  receivedFiles = [];
+  receivedBuffer = [];
+  receivedSize = 0;
+  sessionCode = null;
+  answerCode = null;
+
+  updateConnectionStatus(false);
+
+  document.getElementById('sendSetup')?.classList.remove('hidden');
+  document.getElementById('sendInterface')?.classList.add('hidden');
+  document.getElementById('generateCodeStep')?.classList.remove('hidden');
+  document.getElementById('shareCodeStep')?.classList.add('hidden');
+  document.getElementById('connectingState')?.classList.add('hidden');
+
+  document.getElementById('receiveSetup')?.classList.remove('hidden');
+  document.getElementById('receiveInterface')?.classList.add('hidden');
+  document.getElementById('shareAnswerStep')?.classList.add('hidden');
+  document.getElementById('waitingState')?.classList.remove('hidden');
+
+  const codeDisplay = document.getElementById('codeDisplay');
+  if (codeDisplay) codeDisplay.textContent = '------';
+  
+  const answerCodeInput = document.getElementById('answerCodeInput');
+  if (answerCodeInput) answerCodeInput.value = '';
+  
+  const offerCodeInput = document.getElementById('offerCodeInput');
+  if (offerCodeInput) offerCodeInput.value = '';
+  
+  const answerCodeDisplay = document.getElementById('answerCodeDisplay');
+  if (answerCodeDisplay) answerCodeDisplay.textContent = '------';
+  
+  const fileQueue = document.getElementById('fileQueue');
+  if (fileQueue) fileQueue.innerHTML = '';
+  
+  const receivedFiles = document.getElementById('receivedFiles');
+  if (receivedFiles) receivedFiles.innerHTML = '';
+
+  document.getElementById('featuresSection')?.classList.remove('hidden');
+  document.getElementById('heroSection')?.classList.remove('hidden');
+  
+  // Reinitialize Peer
+  initializePeer();
+}
+
+function updateConnectionStatus(isConnected) {
+  const statusEl = document.getElementById('connectionStatus');
+  if (isConnected) {
+    statusEl.innerHTML = `
+      <span class="status-dot bg-green-500 text-green-500"></span>
+      <span class="text-slate-500">已连接</span>
+    `;
+  } else {
+    statusEl.innerHTML = `
+      <span class="status-dot bg-red-400 text-red-400"></span>
+      <span class="text-slate-500">未连接</span>
+    `;
+  }
+}
+
+// ==================== Utility Functions ====================
+function copyCode() {
+  if (sessionCode) {
+    navigator.clipboard.writeText(sessionCode).then(() => {
+      showToast('连接码已复制', 'success');
+    });
+  }
+}
+
+function copyAnswerCode() {
+  if (answerCode) {
+    navigator.clipboard.writeText(answerCode).then(() => {
+      showToast('确认码已复制', 'success');
+    });
+  }
+}
+
+function toggleSettings() {
+  document.getElementById('settingsModal').classList.toggle('hidden');
+}
+
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  const colors = {
+    success: 'bg-green-50 border-green-200 text-green-700',
+    error: 'bg-red-50 border-red-200 text-red-700',
+    warning: 'bg-yellow-50 border-yellow-200 text-yellow-700',
+    info: 'bg-primary-50 border-primary-200 text-primary-700'
+  };
+  const icons = {
+    success: 'fa-circle-check',
+    error: 'fa-circle-xmark',
+    warning: 'fa-triangle-exclamation',
+    info: 'fa-circle-info'
+  };
+
+  toast.className = `toast glass-strong border ${colors[type]} rounded-xl px-4 py-3 flex items-center gap-3 min-w-[250px] shadow-lg`;
+  toast.innerHTML = `
+    <i class="fas ${icons[type]}"></i>
+    <span class="text-sm">${message}</span>
+  `;
+
+  document.getElementById('toastContainer').appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(20px)';
+    toast.style.transition = 'all 0.3s ease';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ==================== Initialize ====================
+document.addEventListener('DOMContentLoaded', () => {
+  loadFriends();
+  renderFriendsList();
+  setupFileInput();
+  initializePeer();
+  
+  document.getElementById('settingsModal').addEventListener('click', (e) => {
+    if (e.target.id === 'settingsModal') {
+      toggleSettings();
+    }
+  });
+
+  document.getElementById('friendActionModal').addEventListener('click', (e) => {
+    if (e.target.id === 'friendActionModal') {
+      closeFriendModal();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.getElementById('settingsModal').classList.add('hidden');
+      closeFriendModal();
+    }
+  });
+
+  if (!checkWebRTCSupport()) {
+    showToast('您的浏览器不支持 WebRTC，请使用 Chrome、Firefox 或 Edge 浏览器', 'error');
+  } else {
+    setTimeout(() => {
+      showToast('欢迎使用 EasyDrop', 'info');
+    }, 500);
+  }
+});
+</script>
+</body>
+</html>
