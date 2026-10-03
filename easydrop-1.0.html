@@ -212,27 +212,6 @@ tailwind.config = {
     background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1));
   }
 
-  /* ==== 主页：四宫格大按钮 + 信息胶囊（与应用主题色一致） ==== */
-  .home-action-btn {
-    background: linear-gradient(135deg, #6366f1, #0891b2);
-    color: #ffffff;
-    border-radius: 1.5rem;
-    min-height: 8.5rem;
-    font-size: clamp(1.75rem, 4vw, 3rem);
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.25);
-    transition: all 0.3s ease;
-  }
-  .home-action-btn:hover {
-    background: linear-gradient(135deg, #4f46e5, #0e7490);
-    transform: translateY(-3px);
-    box-shadow: 0 16px 36px rgba(99, 102, 241, 0.35);
-  }
-  .home-action-btn:active {
-    transform: translateY(0);
-  }
-
   .info-pill {
     background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(20px);
@@ -253,93 +232,24 @@ tailwind.config = {
     color: #64748b;
   }
 
-  /* 连接建立后隐藏"返回主页"与关闭按钮，防止带连接离开传输界面 */
-  body.is-connected .back-to-home,
-  body.is-connected .panel-close { display: none; }
-
-  /* ==== Container Transform 展开面板 ==== */
-  .panel-scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    background: rgba(15, 23, 42, 0.32);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    opacity: 0;
-    transition: opacity 0.35s ease;
+  /* ==== 主页分段式标签页 ==== */
+  .seg-tab {
+    padding: 0.625rem 1.375rem;
+    border-radius: 9999px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #64748b;
+    white-space: nowrap;
+    transition: all 0.25s ease;
   }
-  .panel-scrim.visible { opacity: 1; }
-
-  /* left/top/width/height 由 JS 内联驱动，过渡本身就是展开动画 */
-  .container-panel {
-    position: fixed;
-    z-index: 60;
-    background: #ffffff;
-    border-radius: 1.5rem;
-    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.25);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                top 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                background-color 0.45s ease;
-  }
-  .container-panel.no-anim { transition: none; }
-  /* display:flex 会压过 hidden 属性的 UA 样式，必须显式恢复 */
-  .container-panel[hidden] { display: none; }
-
-  /* 展开瞬间的按钮文字幽灵层：随面板放大后淡出 */
-  .panel-ghost-label {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .seg-tab:hover { color: #334155; }
+  .seg-tab.active {
+    background: linear-gradient(135deg, #6366f1, #0891b2);
     color: #ffffff;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    pointer-events: none;
-    z-index: 2;
-    transition: opacity 0.18s ease;
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
   }
-  .container-panel.open .panel-ghost-label { opacity: 0; }
-
-  .panel-content {
-    position: relative;
-    z-index: 1;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 1.75rem 1.5rem 2rem;
-    opacity: 0;
-    transform: translateY(14px) scale(0.985);
-    transition: opacity 0.28s ease 0.16s, transform 0.32s ease 0.16s;
-  }
-  .container-panel.open .panel-content {
-    opacity: 1;
-    transform: none;
-  }
-
-  .panel-close {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    z-index: 3;
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 0.75rem;
-    background: rgba(15, 23, 42, 0.06);
-    color: #475569;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-  }
-  .panel-close:hover {
-    background: rgba(15, 23, 42, 0.12);
-    color: #1e293b;
+  @media (min-width: 640px) {
+    .seg-tab { padding: 0.625rem 1.75rem; font-size: 1rem; }
   }
 </style>
 </head>
@@ -391,12 +301,11 @@ tailwind.config = {
   <!-- Main Content -->
   <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- ==================== 主页 ==================== -->
-    <!-- flex-1 + justify-evenly：窗口高时剩余空间均匀分配到四个间隙，避免某个间隙独大 -->
-    <div id="homeSection" class="animate-fade-in flex-1 flex flex-col justify-evenly gap-6">
+    <!-- ==================== 主页（分段式标签页） ==================== -->
+    <div id="homeSection" class="animate-fade-in flex-1 flex flex-col min-h-0">
 
       <!-- Hero Section -->
-      <div id="heroSection" class="text-center">
+      <div id="heroSection" class="text-center mb-6">
         <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
           随时随地，极速传输
         </h2>
@@ -405,24 +314,18 @@ tailwind.config = {
         </p>
       </div>
 
-      <!-- 四宫格主导航：点击后按钮原位展开为内容面板（Container Transform） -->
-      <div id="homeActionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 max-w-5xl mx-auto w-full">
-        <button onclick="switchTab('send')" data-view="send" class="home-action-btn">我要发送</button>
-        <button onclick="switchTab('receive')" data-view="receive" class="home-action-btn">我要接收</button>
-        <button onclick="switchTab('friends')" data-view="friends" class="home-action-btn">好友列表</button>
-        <button onclick="openLocalSend()" data-view="localsend" class="home-action-btn">LocalSend</button>
+      <!-- 分段式标签栏 -->
+      <div class="flex justify-center mb-8">
+        <div id="mainTabs" class="glass rounded-full p-1.5 inline-flex gap-1 max-w-full overflow-x-auto">
+          <button onclick="onTabClick('friends')" data-tab="friends" class="seg-tab">好友列表</button>
+          <button onclick="onTabClick('send')" data-tab="send" class="seg-tab">我要发送</button>
+          <button onclick="onTabClick('receive')" data-tab="receive" class="seg-tab">我要接收</button>
+          <button onclick="onTabClick('localsend')" data-tab="localsend" class="seg-tab">LocalSend</button>
+        </div>
       </div>
 
-      <!-- 本机信息条 -->
-      <div class="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
-        <div class="info-pill">
-          <span class="pill-label">当前网络：</span>
-          <span id="homeNetwork">检测中...</span>
-        </div>
-        <div class="info-pill">
-          <span class="pill-label">本机名称：</span>
-          <span id="homeDeviceName">我的设备</span>
-        </div>
+      <!-- 标签内容区：各功能视图由 JS 在初始化时移入此处 -->
+      <div id="tabContent" class="flex-1 min-h-0 overflow-y-auto">
       </div>
 
     </div>
@@ -430,10 +333,6 @@ tailwind.config = {
     <!-- Friends Mode -->
     <div id="friendsMode" class="hidden animate-fade-in">
       <div class="max-w-4xl mx-auto">
-        <button onclick="goHome()" class="back-to-home mb-6 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
-          <i class="fas fa-arrow-left"></i>
-          返回主页
-        </button>
         <div class="flex items-center justify-between mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">我的好友</h3>
@@ -495,12 +394,6 @@ tailwind.config = {
 
     <!-- Send Mode -->
     <div id="sendMode" class="hidden animate-fade-in">
-      <div class="max-w-2xl mx-auto mb-6">
-        <button onclick="goHome()" class="back-to-home inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
-          <i class="fas fa-arrow-left"></i>
-          返回主页
-        </button>
-      </div>
       <div id="sendSetup" class="max-w-2xl mx-auto">
         <div class="glass-strong rounded-3xl p-8">
           <div class="text-center mb-6">
@@ -638,12 +531,6 @@ tailwind.config = {
 
     <!-- Receive Mode -->
     <div id="receiveMode" class="hidden animate-fade-in">
-      <div class="max-w-2xl mx-auto mb-6">
-        <button onclick="goHome()" class="back-to-home inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
-          <i class="fas fa-arrow-left"></i>
-          返回主页
-        </button>
-      </div>
       <div id="receiveSetup" class="max-w-2xl mx-auto">
         <div class="glass-strong rounded-3xl p-8">
           <div class="text-center mb-6">
@@ -744,10 +631,6 @@ tailwind.config = {
     <!-- History Mode -->
     <div id="historyMode" class="hidden animate-fade-in">
       <div class="max-w-4xl mx-auto">
-        <button onclick="goHome()" class="back-to-home mb-6 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
-          <i class="fas fa-arrow-left"></i>
-          返回主页
-        </button>
         <div class="flex items-center justify-between mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">历史对话</h3>
@@ -829,18 +712,6 @@ tailwind.config = {
   </footer>
 </div>
 
-<!-- Container Transform 展开面板：从被点击的主页按钮原位展开，退出时反向收拢 -->
-<div id="panelScrim" class="panel-scrim" hidden onclick="goHome()"></div>
-<div id="containerPanel" class="container-panel" hidden role="dialog" aria-modal="true">
-  <div class="panel-ghost-label" id="panelGhostLabel"></div>
-  <button type="button" class="panel-close" onclick="goHome()" title="收起，返回主页" aria-label="收起，返回主页">
-    <i class="fas fa-xmark"></i>
-  </button>
-  <div class="panel-content" id="panelContent">
-    <!-- 四个功能视图由 JS 在初始化时移入此处常驻 -->
-  </div>
-</div>
-
 <!-- Settings Modal -->
 <div id="settingsModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay">
   <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
@@ -901,7 +772,7 @@ let peer = null;
 let dataChannel = null;
 let connected = false;
 let isInitiator = false;
-let currentTab = 'home';
+let currentTab = 'friends';
 let currentContentType = 'files';
 let fileQueue = [];
 let receivedFiles = [];
@@ -1908,76 +1779,37 @@ function showIncomingRequestModal(opts) {
   };
 }
 
-// ==================== Tab Switching（Container Transform 版） ====================
-// 主页按钮不再跳转二级页：点击后按钮矩形插值放大为覆盖面板（主题色→白渐变），
-// 盖住其余按钮；退出反向收拢回按钮原位。面板已开时切换视图只换内容不重放动画
-let panelOpen = false;
-let panelAnimating = false;
-
+// ==================== Tab Switching（分段式标签页版） ====================
+// 主页为常驻分段标签：点击切换下方内容区；连接/拨号中禁止切换，防止离开传输界面
 function switchTab(tab) {
-  if (tab === 'home') {
-    closePanel();
+  currentTab = tab;
+  activateMode(tab);
+  document.querySelectorAll('#mainTabs .seg-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+}
+
+// 标签点击（带守卫）；内部流程（连接建立、断开复位）直接调 switchTab 不经守卫
+function onTabClick(tab) {
+  if (tab !== currentTab && (connected || dataChannel)) {
+    showToast('请先断开连接后再切换', 'warning');
     return;
   }
-  currentTab = tab;
-  openPanel(tab);
+  if (tab !== currentTab && (dialingFriend || dialingCode)) {
+    showToast('正在建立连接，请稍候', 'info');
+    return;
+  }
+  if (tab === 'localsend') renderLocalsendList();
+  switchTab(tab);
 }
 
 function openHistory() {
-  renderHistory(); // 先渲染再展开，面板才能量到历史列表/空状态的真实高度
-  switchTab('history');
-}
-
-// 面板终态矩形：宽高贴合当前视图的实际内容（"适应有效显示信息大小"），
-// 以按钮网格为纵向锚点、视口内水平居中；内容超高才封顶并由面板内部滚动
-function measureEndRect() {
-  const panel = document.getElementById('containerPanel');
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const maxW = Math.min(1000, vw - 32);
-  const grid = document.getElementById('homeActionsGrid');
-  const gridTop = grid ? grid.getBoundingClientRect().top : 80;
-
-  const hadNoAnim = panel.classList.contains('no-anim');
-  panel.classList.add('no-anim');
-
-  // 第一遍：以最大宽度排版，量出可见内容的真实占用宽度（居中的 max-w 块只取自身宽度）
-  panel.style.width = maxW + 'px';
-  panel.style.height = 'auto';
-  panel.getBoundingClientRect();
-  let minL = Infinity, maxR = 0;
-  const mode = ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode']
-    .map(id => document.getElementById(id))
-    .find(m => m && !m.classList.contains('hidden'));
-  if (mode) {
-    for (const child of mode.children) {
-      if (child.classList.contains('hidden')) continue;
-      minL = Math.min(minL, child.offsetLeft);
-      maxR = Math.max(maxR, child.offsetLeft + child.offsetWidth);
-    }
+  if (connected || dataChannel) {
+    showToast('请先断开连接后再查看', 'warning');
+    return;
   }
-  const PAD_X = 48; // .panel-content 左右内边距合计
-  const endW = Math.max(420, Math.min(maxW, Math.ceil(maxR - minL) + PAD_X));
-
-  // 第二遍：以最终宽度排版取自然高度（变窄后文本换行可能变高）
-  panel.style.width = endW + 'px';
-  panel.getBoundingClientRect();
-  const naturalH = Math.round(panel.getBoundingClientRect().height);
-  const endH = Math.max(300, Math.min(naturalH, vh - 48));
-
-  if (!hadNoAnim) panel.classList.remove('no-anim');
-
-  const endX = Math.round((vw - endW) / 2);
-  let endY = Math.min(Math.max(Math.round(gridTop), 76), Math.round(vh * 0.35));
-  if (endY + endH > vh - 16) endY = Math.max(16, vh - 16 - endH);
-  return { x: endX, y: endY, w: endW, h: endH };
-}
-
-function applyRect(el, r) {
-  el.style.left = r.x + 'px';
-  el.style.top = r.y + 'px';
-  el.style.width = r.w + 'px';
-  el.style.height = r.h + 'px';
+  renderHistory();
+  switchTab('history');
 }
 
 function activateMode(tab) {
@@ -1985,90 +1817,6 @@ function activateMode(tab) {
     const mode = document.getElementById(t + 'Mode');
     if (mode) mode.classList.toggle('hidden', t !== tab);
   });
-}
-
-function openPanel(tab) {
-  const panel = document.getElementById('containerPanel');
-  if (!panel || panelAnimating) return;
-
-  activateMode(tab);
-  if (panelOpen) {
-    // 面板已展开：只切换内容，并把面板尺寸平滑过渡到新视图的实际大小
-    applyRect(panel, measureEndRect());
-    return;
-  }
-
-  const btn = document.querySelector('#homeSection .home-action-btn[data-view="' + tab + '"]');
-  if (!btn) return;
-
-  panelAnimating = true;
-  panelOpen = true;
-
-  // 先锁定滚动再取按钮矩形，避免滚动条消失造成起始位置抖动
-  document.body.style.overflow = 'hidden';
-  const rect = btn.getBoundingClientRect();
-
-  const ghost = document.getElementById('panelGhostLabel');
-  if (ghost) {
-    ghost.textContent = btn.textContent.trim();
-    ghost.style.fontSize = getComputedStyle(btn).fontSize;
-  }
-
-  const scrim = document.getElementById('panelScrim');
-  panel.hidden = false;
-  if (scrim) scrim.hidden = false;
-
-  panel.classList.add('no-anim');
-  panel.classList.remove('open');
-  const start = {
-    x: Math.round(rect.left), y: Math.round(rect.top),
-    w: Math.round(rect.width), h: Math.round(rect.height)
-  };
-  applyRect(panel, start);
-  panel.style.backgroundColor = '#6366f1'; // 与按钮渐变的靛蓝端一致，展开第一帧不跳色
-  const end = measureEndRect(); // 内部临时改宽高排版量内容，同步块内不产生中间绘制；量完保持 no-anim
-  applyRect(panel, start);      // 恢复起始矩形
-  panel.getBoundingClientRect(); // 强制回流：无过渡状态下固化起始矩形
-  panel.classList.remove('no-anim');
-  panel.getBoundingClientRect(); // 过渡已恢复，再次回流建立过渡基线
-  // FLIP：同一帧内写终态，浏览器自动补间（不依赖 rAF，后台页面也能正确落位）
-  panel.classList.add('open');
-  if (scrim) scrim.classList.add('visible');
-  applyRect(panel, end);
-  panel.style.backgroundColor = '#ffffff';
-
-  setTimeout(() => { panelAnimating = false; }, 480);
-}
-
-function closePanel() {
-  const panel = document.getElementById('containerPanel');
-  const scrim = document.getElementById('panelScrim');
-  if (!panel || !panelOpen || panelAnimating) return;
-
-  const btn = document.querySelector('#homeSection .home-action-btn[data-view="' + currentTab + '"]');
-  panelAnimating = true;
-
-  panel.classList.remove('open');
-  if (scrim) scrim.classList.remove('visible');
-
-  if (btn) {
-    const rect = btn.getBoundingClientRect();
-    panel.style.backgroundColor = '#6366f1';
-    applyRect(panel, {
-      x: Math.round(rect.left), y: Math.round(rect.top),
-      w: Math.round(rect.width), h: Math.round(rect.height)
-    });
-  }
-
-  setTimeout(() => {
-    panel.hidden = true;
-    if (scrim) scrim.hidden = true;
-    document.body.style.overflow = '';
-    activateMode('none');
-    panelAnimating = false;
-    panelOpen = false;
-    currentTab = 'home';
-  }, 480);
 }
 
 function goHome() {
@@ -2080,7 +1828,7 @@ function goHome() {
     showToast('正在建立连接，请稍候', 'info');
     return;
   }
-  closePanel();
+  switchTab('home');
 }
 
 function switchContentType(type) {
@@ -2434,11 +2182,8 @@ function setupConnection(conn) {
     if (!dataChannel || dataChannel !== conn) return;
     updateConnectionStatus(true);
 
-    // 接受入站请求时可能停留在任意视图，切换到对应功能的容器视图
-    activateMode(isInitiator ? 'send' : 'receive');
-    if (currentTab !== (isInitiator ? 'send' : 'receive')) {
-      switchTab(isInitiator ? 'send' : 'receive');
-    }
+    // 连接建立：切到对应角色的标签页
+    switchTab(isInitiator ? 'send' : 'receive');
 
     if (isInitiator) {
       hide('sendSetup');
@@ -3589,19 +3334,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const fy = document.getElementById('footerYear');
   if (fy) fy.textContent = String(new Date().getFullYear());
   loadHistory();
-  // 四个功能视图常驻 Container Transform 面板，主页按钮点击时展开
-  const panelContent = document.getElementById('panelContent');
+  // 功能视图常驻主页内容区，分段标签切换显示；默认落在好友列表
+  const tabContent = document.getElementById('tabContent');
   ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) panelContent.appendChild(el);
+    if (el) tabContent.appendChild(el);
   });
+  switchTab('friends');
   updateHomeInfo();
-  window.addEventListener('resize', () => {
-    // 面板开着时窗口尺寸变化，重新计算贴合内容的矩形避免悬空
-    if (panelOpen && !panelAnimating) {
-      applyRect(document.getElementById('containerPanel'), measureEndRect());
-    }
-  });
   window.addEventListener('online', updateHomeInfo);
   window.addEventListener('offline', updateHomeInfo);
   const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
