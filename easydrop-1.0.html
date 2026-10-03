@@ -392,10 +392,11 @@ tailwind.config = {
   <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-8">
 
     <!-- ==================== 主页 ==================== -->
-    <div id="homeSection" class="animate-fade-in">
+    <!-- flex-1 + justify-evenly：窗口高时剩余空间均匀分配到四个间隙，避免某个间隙独大 -->
+    <div id="homeSection" class="animate-fade-in flex-1 flex flex-col justify-evenly gap-6">
 
       <!-- Hero Section -->
-      <div id="heroSection" class="text-center mb-10">
+      <div id="heroSection" class="text-center">
         <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
           随时随地，极速传输
         </h2>
@@ -405,7 +406,7 @@ tailwind.config = {
       </div>
 
       <!-- 四宫格主导航：点击后按钮原位展开为内容面板（Container Transform） -->
-      <div id="homeActionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 max-w-5xl mx-auto mb-8">
+      <div id="homeActionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 max-w-5xl mx-auto w-full">
         <button onclick="switchTab('send')" data-view="send" class="home-action-btn">我要发送</button>
         <button onclick="switchTab('receive')" data-view="receive" class="home-action-btn">我要接收</button>
         <button onclick="switchTab('friends')" data-view="friends" class="home-action-btn">好友列表</button>
@@ -413,7 +414,7 @@ tailwind.config = {
       </div>
 
       <!-- 本机信息条 -->
-      <div class="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4 mb-12">
+      <div class="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
         <div class="info-pill">
           <span class="pill-label">当前网络：</span>
           <span id="homeNetwork">检测中...</span>
@@ -703,8 +704,8 @@ tailwind.config = {
       </div>
     </div>
 
-    <!-- Features Section：mt-auto 沉底，贴近页脚；卡片内部=参考图：大图标左侧垂直居中，标题+描述都在右侧文字列 -->
-    <div id="featuresSection" class="mt-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Features Section：mt-auto 沉底，贴近页脚；pt-6 保证内容溢出滚动时与上方内容仍有最小间距 -->
+    <div id="featuresSection" class="mt-auto pt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
       <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
         <div class="flex items-center gap-5">
           <div class="w-20 h-20 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
