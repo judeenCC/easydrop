@@ -6,6 +6,7 @@
 <title>EasyDrop - 跨网络文件传输</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -178,11 +179,11 @@ tailwind.config = {
   }
 
   .btn-primary {
-    background: linear-gradient(135deg, #6366f1, #06b6d4);
+    background: linear-gradient(135deg, #6366f1, #0891b2); /* 青端用 cyan-600，白字对比度达 WCAG AA */
     transition: all 0.3s ease;
   }
   .btn-primary:hover {
-    background: linear-gradient(135deg, #4f46e5, #0891b2);
+    background: linear-gradient(135deg, #4f46e5, #0e7490);
     box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
     transform: translateY(-1px);
   }
@@ -210,6 +211,136 @@ tailwind.config = {
   .empty-state-icon {
     background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.1));
   }
+
+  /* ==== 主页：四宫格大按钮 + 信息胶囊（与应用主题色一致） ==== */
+  .home-action-btn {
+    background: linear-gradient(135deg, #6366f1, #0891b2);
+    color: #ffffff;
+    border-radius: 1.5rem;
+    min-height: 8.5rem;
+    font-size: clamp(1.75rem, 4vw, 3rem);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.25);
+    transition: all 0.3s ease;
+  }
+  .home-action-btn:hover {
+    background: linear-gradient(135deg, #4f46e5, #0e7490);
+    transform: translateY(-3px);
+    box-shadow: 0 16px 36px rgba(99, 102, 241, 0.35);
+  }
+  .home-action-btn:active {
+    transform: translateY(0);
+  }
+
+  .info-pill {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    color: #334155;
+    border-radius: 9999px;
+    padding: 0.875rem 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    min-height: 3rem;
+  }
+  .info-pill .pill-label {
+    color: #64748b;
+  }
+
+  /* 连接建立后隐藏"返回主页"与关闭按钮，防止带连接离开传输界面 */
+  body.is-connected .back-to-home,
+  body.is-connected .panel-close { display: none; }
+
+  /* ==== Container Transform 展开面板 ==== */
+  .panel-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(15, 23, 42, 0.32);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .panel-scrim.visible { opacity: 1; }
+
+  /* left/top/width/height 由 JS 内联驱动，过渡本身就是展开动画 */
+  .container-panel {
+    position: fixed;
+    z-index: 60;
+    background: #ffffff;
+    border-radius: 1.5rem;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, 0.25);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                top 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 0.45s ease;
+  }
+  .container-panel.no-anim { transition: none; }
+  /* display:flex 会压过 hidden 属性的 UA 样式，必须显式恢复 */
+  .container-panel[hidden] { display: none; }
+
+  /* 展开瞬间的按钮文字幽灵层：随面板放大后淡出 */
+  .panel-ghost-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity 0.18s ease;
+  }
+  .container-panel.open .panel-ghost-label { opacity: 0; }
+
+  .panel-content {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.75rem 1.5rem 2rem;
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    transition: opacity 0.28s ease 0.16s, transform 0.32s ease 0.16s;
+  }
+  .container-panel.open .panel-content {
+    opacity: 1;
+    transform: none;
+  }
+
+  .panel-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 3;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.06);
+    color: #475569;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+  .panel-close:hover {
+    background: rgba(15, 23, 42, 0.12);
+    color: #1e293b;
+  }
 </style>
 </head>
 <body class="bg-mesh min-h-screen">
@@ -226,7 +357,7 @@ tailwind.config = {
 
   <!-- Header -->
   <header class="glass-strong border-b border-slate-200/50 sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center gap-3">
           <div class="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
@@ -247,45 +378,61 @@ tailwind.config = {
           <button onclick="toggleSettings()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
             <i class="fas fa-cog text-slate-500"></i>
           </button>
+
+          <button onclick="openHistory()" class="h-10 px-4 rounded-xl glass hover:bg-slate-100 flex items-center justify-center gap-2 transition-all text-sm text-slate-600" title="查看传输记录">
+            <i class="fas fa-clock-rotate-left text-slate-500"></i>
+            <span class="hidden sm:inline">传输记录</span>
+          </button>
         </div>
       </div>
     </div>
   </header>
 
   <!-- Main Content -->
-  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+  <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- Hero Section -->
-    <div id="heroSection" class="text-center mb-8 animate-fade-in">
-      <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
-        随时随地，极速传输
-      </h2>
-      <p class="text-slate-500 text-lg max-w-2xl mx-auto">
-        基于 WebRTC 点对点技术，支持跨网络传输任意类型文件，安全、快速、无需注册
-      </p>
-    </div>
+    <!-- ==================== 主页 ==================== -->
+    <div id="homeSection" class="animate-fade-in">
 
-    <!-- Tab Switcher -->
-    <div class="flex justify-center mb-8">
-      <div class="glass rounded-2xl p-1.5 inline-flex gap-1">
-        <button id="friendsTab" onclick="switchTab('friends')" class="tab-active px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2">
-          <i class="fas fa-users"></i>
-          <span>好友列表</span>
-        </button>
-        <button id="sendTab" onclick="switchTab('send')" class="px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
-          <i class="fas fa-paper-plane"></i>
-          <span>新建连接</span>
-        </button>
-        <button id="receiveTab" onclick="switchTab('receive')" class="px-6 py-3 rounded-xl text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
-          <i class="fas fa-download"></i>
-          <span>接收文件</span>
-        </button>
+      <!-- Hero Section -->
+      <div id="heroSection" class="text-center mb-10">
+        <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
+          随时随地，极速传输
+        </h2>
+        <p class="text-slate-500 text-lg max-w-2xl mx-auto">
+          基于 WebRTC 点对点技术，支持跨网络传输任意类型文件，安全、快速、无需注册
+        </p>
       </div>
+
+      <!-- 四宫格主导航：点击后按钮原位展开为内容面板（Container Transform） -->
+      <div id="homeActionsGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-8 max-w-5xl mx-auto mb-8">
+        <button onclick="switchTab('send')" data-view="send" class="home-action-btn">我要发送</button>
+        <button onclick="switchTab('receive')" data-view="receive" class="home-action-btn">我要接收</button>
+        <button onclick="switchTab('friends')" data-view="friends" class="home-action-btn">好友列表</button>
+        <button onclick="openLocalSend()" data-view="localsend" class="home-action-btn">LocalSend</button>
+      </div>
+
+      <!-- 本机信息条 -->
+      <div class="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4 mb-12">
+        <div class="info-pill">
+          <span class="pill-label">当前网络：</span>
+          <span id="homeNetwork">检测中...</span>
+        </div>
+        <div class="info-pill">
+          <span class="pill-label">本机名称：</span>
+          <span id="homeDeviceName">我的设备</span>
+        </div>
+      </div>
+
     </div>
 
     <!-- Friends Mode -->
-    <div id="friendsMode" class="animate-fade-in">
+    <div id="friendsMode" class="hidden animate-fade-in">
       <div class="max-w-4xl mx-auto">
+        <button onclick="goHome()" class="back-to-home mb-6 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
+          <i class="fas fa-arrow-left"></i>
+          返回主页
+        </button>
         <div class="flex items-center justify-between mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">我的好友</h3>
@@ -312,11 +459,47 @@ tailwind.config = {
             创建新连接
           </button>
         </div>
+
+        <!-- 我的设备IP / 地址互连：复制地址给对方，或粘贴对方地址发起连接/加好友 -->
+        <div id="ipShareCard" class="glass rounded-2xl p-5 mt-6">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+              <i class="fas fa-network-wired text-primary-500 text-xl"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-700 mb-1">我的设备IP（连接地址）</p>
+              <p id="myDeviceAddress" class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
+              <p id="myLanIp" class="js-lan-ip text-xs text-slate-400 mt-1">本机IP：检测中...</p>
+            </div>
+            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
+              <i class="fas fa-copy text-primary-500"></i>
+            </button>
+          </div>
+          <div class="mt-5 pt-5 border-t border-slate-200/70">
+            <label class="text-sm text-slate-500 mb-2 block">粘贴对方的连接地址，向对方发起请求</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input type="text" id="remoteAddressInput" placeholder="例如：https://…/?connect=xxxxxxxx" class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+              <button onclick="connectByAddress()" class="px-5 py-3 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap">
+                <i class="fas fa-plug mr-1"></i>连接
+              </button>
+              <button onclick="addFriendByAddress()" class="px-5 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 text-sm font-medium whitespace-nowrap">
+                <i class="fas fa-user-plus mr-1"></i>添加好友
+              </button>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">对方会收到确认弹窗，同意后建立连接或添加为好友；同一局域网、跨网络均可</p>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Send Mode -->
     <div id="sendMode" class="hidden animate-fade-in">
+      <div class="max-w-2xl mx-auto mb-6">
+        <button onclick="goHome()" class="back-to-home inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
+          <i class="fas fa-arrow-left"></i>
+          返回主页
+        </button>
+      </div>
       <div id="sendSetup" class="max-w-2xl mx-auto">
         <div class="glass-strong rounded-3xl p-8">
           <div class="text-center mb-6">
@@ -454,6 +637,12 @@ tailwind.config = {
 
     <!-- Receive Mode -->
     <div id="receiveMode" class="hidden animate-fade-in">
+      <div class="max-w-2xl mx-auto mb-6">
+        <button onclick="goHome()" class="back-to-home inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
+          <i class="fas fa-arrow-left"></i>
+          返回主页
+        </button>
+      </div>
       <div id="receiveSetup" class="max-w-2xl mx-auto">
         <div class="glass-strong rounded-3xl p-8">
           <div class="text-center mb-6">
@@ -464,17 +653,17 @@ tailwind.config = {
               <div class="pulse-ring" style="border-color: rgba(6, 182, 212, 0.4);"></div>
             </div>
             <h3 class="text-xl font-semibold mb-2 text-slate-800">接收文件</h3>
-            <p class="text-slate-400 text-sm">输入发送方提供的6位连接码，建立接收连接</p>
+            <p class="text-slate-400 text-sm">输入发送方提供的6位连接码，输完自动建立连接</p>
           </div>
 
           <div class="bg-slate-50 rounded-2xl p-6 mb-4 border border-slate-200">
-            <p class="text-xs text-slate-400 mb-3 text-center">输入发送方的6位连接码</p>
-            <input type="text" id="offerCodeInput" maxlength="6" placeholder="------" class="code-input w-full bg-transparent text-slate-700 outline-none mb-4" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+            <p class="text-xs text-slate-400 mb-3 text-center">输入发送方的6位连接码，输完即自动连接</p>
+            <input type="text" id="offerCodeInput" maxlength="6" placeholder="------" class="code-input w-full bg-transparent text-slate-700 outline-none mb-4" oninput="onOfferCodeInput(this)" inputmode="numeric" autocomplete="one-time-code">
           </div>
 
           <button onclick="generateAnswer()" class="w-full py-4 rounded-2xl btn-primary text-white font-medium text-lg shadow-lg">
             <i class="fas fa-link mr-2"></i>
-            生成确认码
+            立即连接
           </button>
 
         </div>
@@ -514,37 +703,119 @@ tailwind.config = {
       </div>
     </div>
 
-    <!-- Features Section -->
-    <div id="featuresSection" class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Features Section：mt-auto 沉底，贴近页脚；卡片内部=参考图：大图标左侧垂直居中，标题+描述都在右侧文字列 -->
+    <div id="featuresSection" class="mt-auto grid grid-cols-1 md:grid-cols-3 gap-6">
       <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
-        <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center mb-4">
-          <i class="fas fa-globe text-primary-500 text-xl"></i>
+        <div class="flex items-center gap-5">
+          <div class="w-20 h-20 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-globe text-primary-500 text-3xl"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h4 class="text-lg font-semibold text-slate-700 mb-2">跨网络传输</h4>
+            <p class="text-slate-400 text-sm">支持不同网络环境下的文件传输，深圳到上海，随时随地</p>
+          </div>
         </div>
-        <h4 class="font-semibold mb-2 text-slate-700">跨网络传输</h4>
-        <p class="text-slate-400 text-sm">支持不同网络环境下的文件传输，深圳到上海，随时随地</p>
       </div>
       <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
-        <div class="w-12 h-12 rounded-xl bg-accent-500/15 flex items-center justify-center mb-4">
-          <i class="fas fa-shield-halved text-accent-500 text-xl"></i>
+        <div class="flex items-center gap-5">
+          <div class="w-20 h-20 rounded-2xl bg-accent-500/15 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-shield-halved text-accent-500 text-3xl"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h4 class="text-lg font-semibold text-slate-700 mb-2">端到端加密</h4>
+            <p class="text-slate-400 text-sm">基于 WebRTC 点对点技术，数据不经过第三方服务器</p>
+          </div>
         </div>
-        <h4 class="font-semibold mb-2 text-slate-700">端到端加密</h4>
-        <p class="text-slate-400 text-sm">基于 WebRTC 点对点技术，数据不经过第三方服务器</p>
       </div>
       <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
-        <div class="w-12 h-12 rounded-xl bg-purple-500/15 flex items-center justify-center mb-4">
-          <i class="fas fa-users text-purple-500 text-xl"></i>
+        <div class="flex items-center gap-5">
+          <div class="w-20 h-20 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-users text-purple-500 text-3xl"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h4 class="text-lg font-semibold text-slate-700 mb-2">好友快捷传输</h4>
+            <p class="text-slate-400 text-sm">添加常用设备为好友，后续传输一键直达</p>
+          </div>
         </div>
-        <h4 class="font-semibold mb-2 text-slate-700">好友快捷传输</h4>
-        <p class="text-slate-400 text-sm">添加常用设备为好友，后续传输一键直达</p>
+      </div>
+    </div>
+
+    <!-- History Mode -->
+    <div id="historyMode" class="hidden animate-fade-in">
+      <div class="max-w-4xl mx-auto">
+        <button onclick="goHome()" class="back-to-home mb-6 inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-600 transition-all">
+          <i class="fas fa-arrow-left"></i>
+          返回主页
+        </button>
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold text-slate-800">历史对话</h3>
+            <p class="text-sm text-slate-400">本机最近的收发记录，仅保存在本地浏览器</p>
+          </div>
+          <button onclick="clearHistory()" id="clearHistoryBtn" class="hidden px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
+            <i class="fas fa-trash mr-1"></i>
+            清空记录
+          </button>
+        </div>
+
+        <div id="historyList" class="space-y-3"></div>
+
+        <div id="historyEmptyState" class="glass-strong rounded-3xl p-12 text-center hidden">
+          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
+            <i class="fas fa-clock-rotate-left text-3xl text-primary-500"></i>
+          </div>
+          <h3 class="text-xl font-semibold mb-2 text-slate-700">还没有传输记录</h3>
+          <p class="text-slate-400 text-sm">完成一次发送或接收后，记录会出现在这里</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- LocalSend Mode：LocalSend 式速传——选设备直连，拖入文件即发 -->
+    <div id="localsendMode" class="hidden animate-fade-in">
+      <div class="max-w-2xl mx-auto">
+        <div class="text-center mb-5">
+          <h3 class="text-xl font-semibold text-slate-800">LocalSend 速传</h3>
+          <p class="text-slate-400 text-sm mt-1">选择设备即直连，拖入文件立即发送</p>
+          <p id="localsendNetStatus" class="text-xs text-slate-400 mt-2">局域网发现：启动中...</p>
+        </div>
+
+        <div id="localsendDeviceList" class="space-y-3"></div>
+
+        <div id="localsendEmptyHint" class="hidden glass rounded-2xl p-6 text-center text-sm text-slate-400 mb-4">
+          暂未发现设备。同一网段的设备打开本页面后会自动出现在这里；也可在下方粘贴对方连接地址直接连接。
+        </div>
+
+        <div class="glass rounded-2xl p-5 mt-4">
+          <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+              <i class="fas fa-mobile-screen text-primary-500"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-700">本设备</p>
+              <p class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
+              <p class="js-lan-ip text-xs text-slate-400 mt-0.5">本机IP：检测中...</p>
+            </div>
+            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
+              <i class="fas fa-copy text-primary-500"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-col sm:flex-row gap-2">
+          <input type="text" id="localsendAddressInput" placeholder="或粘贴对方连接地址，点连接发起请求" class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+          <button onclick="localsendDialByAddress()" class="px-5 py-3 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap">
+            <i class="fas fa-plug mr-1"></i>连接
+          </button>
+        </div>
       </div>
     </div>
   </main>
 
   <!-- Footer -->
   <footer class="glass-strong border-t border-slate-200/50 mt-auto">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div class="px-4 sm:px-6 lg:px-8 py-6">
       <div class="flex flex-col md:flex-row items-center justify-between gap-4">
-        <p class="text-slate-400 text-sm">© 2024 EasyDrop · 基于 WebRTC 技术</p>
+        <p class="text-slate-400 text-sm">© <span id="footerYear">2026</span> EasyDrop · 基于 WebRTC 技术</p>
         <div class="flex items-center gap-6 text-sm text-slate-400">
           <span class="flex items-center gap-2">
             <i class="fas fa-circle text-green-500 text-xs"></i>
@@ -557,8 +828,20 @@ tailwind.config = {
   </footer>
 </div>
 
+<!-- Container Transform 展开面板：从被点击的主页按钮原位展开，退出时反向收拢 -->
+<div id="panelScrim" class="panel-scrim" hidden onclick="goHome()"></div>
+<div id="containerPanel" class="container-panel" hidden role="dialog" aria-modal="true">
+  <div class="panel-ghost-label" id="panelGhostLabel"></div>
+  <button type="button" class="panel-close" onclick="goHome()" title="收起，返回主页" aria-label="收起，返回主页">
+    <i class="fas fa-xmark"></i>
+  </button>
+  <div class="panel-content" id="panelContent">
+    <!-- 四个功能视图由 JS 在初始化时移入此处常驻 -->
+  </div>
+</div>
+
 <!-- Settings Modal -->
-<div id="settingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+<div id="settingsModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay">
   <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
     <div class="flex items-center justify-between mb-6">
       <h3 class="text-lg font-semibold text-slate-800">设置</h3>
@@ -579,10 +862,10 @@ tailwind.config = {
       <div>
         <label class="text-sm text-slate-500 mb-2 block">下载目录</label>
         <div class="flex items-center gap-2">
-          <input type="text" value="浏览器默认下载" disabled class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 text-slate-400">
-          <button class="px-4 py-3 rounded-xl glass text-sm text-slate-400" disabled>更改</button>
+          <input type="text" id="downloadDirDisplay" value="浏览器默认下载" disabled class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 text-slate-400">
+          <button type="button" id="changeDirBtn" onclick="chooseDownloadDir()" class="px-4 py-3 rounded-xl glass hover:bg-slate-100 text-sm text-slate-600 font-medium">更改</button>
         </div>
-        <p class="text-xs text-slate-400 mt-1">文件将保存到浏览器默认下载目录</p>
+        <p class="text-xs text-slate-400 mt-1" id="downloadDirHint">文件将保存到浏览器默认下载目录</p>
       </div>
       <div>
         <label class="text-sm text-slate-500 mb-2 block">设备ID（好友直连使用，无需修改）</label>
@@ -594,7 +877,7 @@ tailwind.config = {
 </div>
 
 <!-- Friend Action Modal -->
-<div id="friendActionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+<div id="friendActionModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay">
   <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
     <div class="flex items-center justify-between mb-6">
       <h3 class="text-lg font-semibold text-slate-800" id="friendModalTitle">好友操作</h3>
@@ -609,7 +892,7 @@ tailwind.config = {
 </div>
 
 <!-- Toast Container -->
-<div id="toastContainer" class="fixed bottom-6 right-6 z-50 space-y-3"></div>
+<div id="toastContainer" class="fixed bottom-6 right-6 z-[80] space-y-3"></div>
 
 <script>
 // ==================== Global State ====================
@@ -617,7 +900,7 @@ let peer = null;
 let dataChannel = null;
 let connected = false;
 let isInitiator = false;
-let currentTab = 'friends';
+let currentTab = 'home';
 let currentContentType = 'files';
 let fileQueue = [];
 let receivedFiles = [];
@@ -992,6 +1275,12 @@ function confirmRemoveFriend(friendId) {
 function closeFriendModal() {
   document.getElementById('friendActionModal').classList.add('hidden');
   currentFriendId = null;
+  // 弹窗被 overlay 点击/Esc 关闭时，视为拒绝未处理的连接请求
+  if (pendingIncomingConn) {
+    try { pendingIncomingConn.close(); } catch (e) { /* noop */ }
+    pendingIncomingConn = null;
+    showToast('已拒绝对方的连接请求', 'info');
+  }
 }
 
 // 一键直连好友：直接拨对方稳定的设备 ID，无需再交换 6 位码
@@ -1001,8 +1290,8 @@ async function connectToFriend(friendId) {
 
   closeFriendModal();
 
-  if (connected || dataChannel) {
-    showToast('已有活动连接，请先断开后再发起新连接', 'warning');
+  if (connected || dataChannel || pendingIncomingConn) {
+    showToast('已有连接在处理，请先完成或断开', 'warning');
     return;
   }
   if (!friend.deviceId) {
@@ -1054,30 +1343,673 @@ async function connectToFriend(friendId) {
   });
 }
 
-// ==================== Tab Switching ====================
-function switchTab(tab) {
-  currentTab = tab;
+// ==================== Transfer History ====================
+// 主页"历史对话"入口的数据；只存本地 localStorage，最多保留 100 条
+// （刻意不叫 history，避免遮蔽 window.history）
+const HISTORY_KEY = 'easydrop_history';
+const HISTORY_MAX = 100;
+let transferHistory = [];
 
-  ['friends', 'send', 'receive'].forEach(t => {
-    const tabBtn = document.getElementById(t + 'Tab');
-    const mode = document.getElementById(t + 'Mode');
-    if (!tabBtn || !mode) return;
-    if (t === tab) {
-      tabBtn.classList.add('tab-active');
-      tabBtn.classList.remove('text-slate-400');
-      mode.classList.remove('hidden');
-    } else {
-      tabBtn.classList.remove('tab-active');
-      tabBtn.classList.add('text-slate-400');
-      mode.classList.add('hidden');
-    }
+function loadHistory() {
+  try {
+    const stored = localStorage.getItem(HISTORY_KEY);
+    transferHistory = stored ? JSON.parse(stored) : [];
+    if (!Array.isArray(transferHistory)) transferHistory = [];
+  } catch (e) {
+    transferHistory = [];
+  }
+}
+
+function addHistoryEntry(entry) {
+  transferHistory.unshift({
+    t: entry.t || Date.now(),
+    dir: entry.dir === 'in' ? 'in' : 'out',
+    kind: entry.kind === 'text' ? 'text' : 'file',
+    name: entry.name || '未命名',
+    size: entry.size || 0,
+    peer: entry.peer || ''
+  });
+  if (transferHistory.length > HISTORY_MAX) transferHistory.length = HISTORY_MAX;
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory));
+  } catch (e) { /* 存储失败不影响传输主流程 */ }
+}
+
+function currentPeerName() {
+  return remoteIdentity ? remoteIdentity.deviceName : '对方设备';
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  const empty = document.getElementById('historyEmptyState');
+  const clearBtn = document.getElementById('clearHistoryBtn');
+  if (!list) return;
+
+  if (transferHistory.length === 0) {
+    list.innerHTML = '';
+    if (empty) empty.classList.remove('hidden');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+  if (clearBtn) clearBtn.classList.remove('hidden');
+  list.innerHTML = '';
+
+  transferHistory.forEach(item => {
+    const isIn = item.dir === 'in';
+    const isText = item.kind === 'text';
+    const iconInfo = isText
+      ? { icon: 'fa-font', color: 'text-primary-500', bg: 'bg-primary-500/15' }
+      : (isIn
+        ? { icon: 'fa-arrow-down', color: 'text-accent-500', bg: 'bg-accent-500/15' }
+        : { icon: 'fa-arrow-up', color: 'text-primary-500', bg: 'bg-primary-500/15' });
+    const sizeText = isText ? `${item.size || 0} 字` : formatFileSize(item.size);
+
+    const el = document.createElement('div');
+    el.className = 'glass rounded-2xl p-4';
+    el.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
+          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
+            <span class="text-xs ${isIn ? 'text-accent-500' : 'text-primary-500'} ml-2 flex-shrink-0">${isIn ? '接收' : '发送'}</span>
+          </div>
+          <p class="text-xs text-slate-400">${isIn ? '来自' : '发往'} ${esc(item.peer || '对方设备')} · ${sizeText} · ${formatDate(item.t)}</p>
+        </div>
+      </div>
+    `;
+    list.appendChild(el);
+  });
+}
+
+function clearHistory() {
+  transferHistory = [];
+  try { localStorage.removeItem(HISTORY_KEY); } catch (e) { /* noop */ }
+  renderHistory();
+  showToast('历史记录已清空', 'info');
+}
+
+// ==================== IP / 地址互连 ====================
+// 浏览器无法按裸 IP 直连（网页不能监听端口、WebRTC 需信令先交换），故以
+// 「页面链接+设备ID」作为设备的可复制地址；拨入陌生设备时本端弹确认把关
+const CONNECT_PARAM = 'connect';
+let pendingIncomingConn = null; // 等待本端确认的入站连接
+let autoAddNextFriend = false;  // A 端点了"接受并加好友"后，hello 时自动添加
+let dialPurpose = 'connect';    // B 端发起目的：'connect' | 'add-friend'
+
+function buildDeviceAddress(deviceId) {
+  return location.origin + location.pathname + '?' + CONNECT_PARAM + '=' + (deviceId || myDeviceId);
+}
+
+// 接受三种输入：完整链接 ?connect=ID、原始设备 PeerID easydrop-dev-UUID、裸 UUID
+function parseDeviceAddress(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  let m = s.match(/[?&]connect=([A-Za-z0-9._-]+)/);
+  if (m) return safeId(m[1]);
+  m = s.match(/easydrop-dev-([A-Za-z0-9._-]+)/);
+  if (m) return safeId(m[1]);
+  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)) return s;
+  return null;
+}
+
+function renderDeviceAddress() {
+  document.querySelectorAll('.js-device-address').forEach(el => {
+    el.textContent = buildDeviceAddress();
+  });
+}
+
+function copyDeviceAddress() {
+  navigator.clipboard.writeText(buildDeviceAddress()).then(() => {
+    showToast('连接地址已复制，发给对方即可发起连接', 'success');
+  }).catch(() => {
+    showToast('复制失败', 'error');
+  });
+}
+
+// 尽力探测本机局域网 IP；Chrome 默认用 mDNS 隐藏内网 IP，探测不到时如实提示
+// 结果缓存：局域网发现模块复用同一次探测，避免重复开 RTCPeerConnection
+let lanIpCache = null;
+function detectLanIp() {
+  if (lanIpCache) return Promise.resolve(lanIpCache);
+  return new Promise(resolve => {
+    let settled = false;
+    let pc;
+    const done = v => {
+      if (settled) return;
+      settled = true;
+      lanIpCache = v;
+      try { if (pc) pc.close(); } catch (e) { /* noop */ }
+      resolve(v);
+    };
+    try {
+      pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('ip-probe');
+      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => done(null));
+      pc.onicecandidate = e => {
+        if (!e.candidate) return done(null);
+        const m = e.candidate.candidate.match(/(\d{1,3}(?:\.\d{1,3}){3})/);
+        if (m && m[1] !== '127.0.0.1') done(m[1]);
+      };
+      setTimeout(() => done(null), 3000);
+    } catch (e) { done(null); }
+  });
+}
+
+async function updateLanIpDisplay() {
+  const els = document.querySelectorAll('.js-lan-ip');
+  if (els.length === 0) return;
+  const ip = await detectLanIp();
+  const text = ip
+    ? '本机局域网IP：' + ip
+    : '本机IP：浏览器未暴露（隐私保护），连接请复制上方地址';
+  els.forEach(el => { el.textContent = text; });
+}
+
+function connectByAddress() { dialByAddress('connect'); }
+function addFriendByAddress() { dialByAddress('add-friend'); }
+function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput'); }
+
+// ==================== LocalSend 速传 + 局域网发现 ====================
+// 浏览器无 UDP 组播，借公共 MQTT-over-WebSocket 做信标总线：同一网段
+// （按探测到的局域网 IP 划分）的设备互发心跳即可"发现"彼此；连不上
+// 总线或拿不到本机 IP 时优雅降级（仅显示好友）。对端发来的名称展示前
+// 一律转义，拨号仍需对方确认弹窗把关
+let lanBeaconClient = null;
+let lanBrokerOk = false;
+let lanSubnet = 'unknown';
+const lanPeers = new Map();          // deviceId -> { id, name, ts }
+const LAN_TOPIC_PREFIX = 'easydrop-lan/v1/';
+const LAN_BEACON_INTERVAL = 5000;
+const LAN_PEER_TTL = 16000;          // 3 个周期没收到心跳即视为离线
+let lanBeaconTimer = null;
+// 公共 MQTT 信标总线列表：单个 broker 被网络阻断时自动轮换下一个。
+// ws:// 明文项供 HTTP 部署（如本机 127.0.0.1）使用；HTTPS 下浏览器会立即
+// 拒绝混合内容，轮换自动跳过。成功连过的序号存 localStorage，下次优先
+const LAN_BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+  'ws://broker.hivemq.com:8000/mqtt',
+  'wss://test.mosquitto.org:8081'
+];
+let lanBrokerIdx = 0;
+let lanBrokerTryTimer = null;
+
+function lanTopic(subnet) {
+  return LAN_TOPIC_PREFIX + (subnet || 'unknown') + '/beacon';
+}
+
+function updateLanNetStatus(text) {
+  const el = document.getElementById('localsendNetStatus');
+  if (el) el.textContent = text;
+}
+
+// 已连接 broker 时的状态文案（含实时发现数）
+function refreshLanStatus() {
+  if (!lanBrokerOk) return;
+  const n = lanPeersLive().length;
+  const suffix = lanSubnet === 'unknown' ? '（本机IP未暴露，匹配所有未暴露设备）' : '';
+  updateLanNetStatus('局域网发现运行中 · 网段 ' + lanSubnet + suffix + ' · 已发现 ' + n + ' 台设备');
+}
+
+function initLanDiscovery() {
+  lanSubnet = lanIpCache ? lanIpCache.replace(/\.\d+$/, '.x') : 'unknown';
+  if (typeof mqtt === 'undefined') {
+    updateLanNetStatus('局域网发现不可用（组件加载失败，检查网络后刷新）');
+    return;
+  }
+  try {
+    const saved = parseInt(localStorage.getItem('easydrop_lan_broker') || '0', 10);
+    if (saved >= 0 && saved < LAN_BROKERS.length) lanBrokerIdx = saved;
+  } catch (e) { /* noop */ }
+  lanConnect();
+}
+
+function lanConnect() {
+  const url = LAN_BROKERS[lanBrokerIdx % LAN_BROKERS.length];
+  updateLanNetStatus('局域网发现连接中（' + (lanBrokerIdx % LAN_BROKERS.length + 1) + '/' + LAN_BROKERS.length + '）...');
+  let client;
+  try {
+    // clientId 每次尝试唯一：固定名会被 broker 端的旧僵尸会话顶掉，表现为秒连秒断
+    client = mqtt.connect(url, {
+      clientId: 'easydrop-' + myDeviceId.replace(/-/g, '').slice(0, 8) + '-' + Math.random().toString(16).slice(2, 6),
+      keepalive: 30,
+      reconnectPeriod: 0,   // 重连自己管：失败即轮换下一个 broker
+      connectTimeout: 6000
+    });
+  } catch (e) {
+    scheduleLanRetry();
+    return;
+  }
+  lanBeaconClient = client;
+
+  client.on('connect', () => {
+    lanBrokerOk = true;
+    try { localStorage.setItem('easydrop_lan_broker', String(lanBrokerIdx % LAN_BROKERS.length)); } catch (e) { /* noop */ }
+    lanBeaconClient.subscribe(lanTopic(lanSubnet), { qos: 0 });
+    publishLanBeacon();
+    if (lanBeaconTimer) clearInterval(lanBeaconTimer);
+    lanBeaconTimer = setInterval(publishLanBeacon, LAN_BEACON_INTERVAL);
+    refreshLanStatus();
+  });
+  client.on('message', (topic, payload) => {
+    try {
+      const msg = JSON.parse(payload.toString());
+      const id = safeId(msg.id);
+      if (!id || id === myDeviceId) return; // broker 会把自家信标回显给自己，过滤
+      const name = (typeof msg.name === 'string' && msg.name.trim())
+        ? msg.name.trim().slice(0, 40) : '未知设备';
+      lanPeers.set(id, { id: id, name: name, ts: Date.now() });
+      renderLocalsendList();
+      refreshLanStatus();
+    } catch (e) { /* 忽略畸形信标 */ }
+  });
+  client.on('close', () => {
+    if (lanBeaconClient !== client) return; // 已切换到下一个 broker
+    lanBrokerOk = false;
+    if (lanBeaconTimer) { clearInterval(lanBeaconTimer); lanBeaconTimer = null; }
+    scheduleLanRetry();
+  });
+  client.on('error', () => {
+    try { client.end(true); } catch (e) { /* end 触发 close 走轮换 */ }
+  });
+}
+
+function scheduleLanRetry() {
+  if (lanBrokerTryTimer) return;
+  lanBrokerIdx++;
+  updateLanNetStatus('局域网发现重连中...');
+  lanBrokerTryTimer = setTimeout(() => {
+    lanBrokerTryTimer = null;
+    try { if (lanBeaconClient) lanBeaconClient.end(true); } catch (e) { /* noop */ }
+    lanConnect();
+  }, 3000);
+}
+
+function publishLanBeacon() {
+  if (!lanBeaconClient || !lanBeaconClient.connected) return;
+  try {
+    lanBeaconClient.publish(lanTopic(lanSubnet), JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() }), { qos: 0 });
+  } catch (e) { /* noop */ }
+}
+
+function lanPeersLive() {
+  const now = Date.now();
+  lanPeers.forEach((p, id) => { if (now - p.ts > LAN_PEER_TTL) lanPeers.delete(id); });
+  return Array.from(lanPeers.values());
+}
+
+function renderLocalsendList() {
+  const list = document.getElementById('localsendDeviceList');
+  const hint = document.getElementById('localsendEmptyHint');
+  if (!list) return;
+
+  // 合并两源：LAN 信标发现的设备优先（可能同时是好友，合并为一行），其余好友随后
+  const rows = [];
+  const seen = new Set();
+  lanPeersLive().forEach(p => {
+    seen.add(p.id);
+    const f = friends.find(fr => fr.deviceId === p.id);
+    rows.push({ deviceId: p.id, friendId: f ? f.id : null, name: f ? f.name : p.name, lan: true, isFriend: !!f });
+  });
+  friends.forEach(f => {
+    if (!f.deviceId || seen.has(f.deviceId)) return;
+    rows.push({ deviceId: f.deviceId, friendId: f.id, name: f.name, lan: false, isFriend: true });
   });
 
-  if (connected) {
-    hide('featuresSection');
-  } else {
-    show('featuresSection');
+  if (rows.length === 0) {
+    list.innerHTML = '';
+    if (hint) hint.classList.remove('hidden');
+    return;
   }
+  if (hint) hint.classList.add('hidden');
+  list.innerHTML = '';
+
+  rows.forEach(row => {
+    const f = friends.find(fr => fr.id === row.friendId);
+    const colors = (f && f.avatarColors) || avatarColors[0];
+    const initials = (row.name || '?').charAt(0).toUpperCase();
+    const badge = row.lan
+      ? (row.isFriend
+        ? '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网 · 好友</span>'
+        : '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网发现</span>')
+      : '<span class="px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-500 text-xs flex-shrink-0">好友</span>';
+    const subtext = row.lan
+      ? (row.isFriend ? '局域网在线 · 点击一键直连' : '局域网在线 · 点击发起连接（对方需确认）')
+      : '点击直连 · 对方在线时立即建立';
+
+    const el = document.createElement('div');
+    el.className = 'friend-card glass rounded-2xl p-4 cursor-pointer';
+    el.onclick = () => row.friendId ? connectToFriend(row.friendId) : dialDevice(row.deviceId);
+    el.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="relative flex-shrink-0">
+          <div class="friend-avatar w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg font-bold" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+            ${esc(initials)}
+          </div>
+          ${row.lan ? '<span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white"></span>' : ''}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="font-semibold text-slate-800 truncate">${esc(row.name)}</p>
+            ${badge}
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">${subtext}</p>
+        </div>
+        <div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-paper-plane text-primary-500 text-sm"></i>
+        </div>
+      </div>`;
+    list.appendChild(el);
+  });
+}
+
+function openLocalSend() {
+  renderLocalsendList();
+  renderDeviceAddress();
+  switchTab('localsend');
+}
+
+async function dialByAddress(purpose, inputId) {
+  const input = document.getElementById(inputId || 'remoteAddressInput');
+  const targetId = parseDeviceAddress(input ? input.value : '');
+  if (!targetId) {
+    showToast('请粘贴对方的连接地址（对方"我的设备IP"卡片中可复制）', 'warning');
+    return;
+  }
+  if (targetId === myDeviceId) {
+    showToast('这是本设备的地址，请输入对方的', 'warning');
+    return;
+  }
+  const existing = friends.find(f => f.deviceId === targetId);
+  if (existing) {
+    showToast(existing.name + ' 已是好友，直接为你发起直连', 'info');
+    connectToFriend(existing.id);
+    return;
+  }
+  dialPurpose = purpose;
+  await dialDevice(targetId);
+}
+
+// 按稳定设备 ID 拨号；对方是陌生设备时会先弹确认，同意才真正握手
+async function dialDevice(deviceId) {
+  if (connected || dataChannel || pendingIncomingConn) {
+    showToast('已有连接在处理，请先断开或完成后再发起', 'warning');
+    return;
+  }
+  if (!peer) {
+    showToast('信令连接未就绪，请稍后重试', 'error');
+    return;
+  }
+  if (!peer.open) {
+    showToast('正在连接服务器，马上开始...', 'info');
+    const ok = await ensurePeerOpen();
+    if (!ok) {
+      showToast('连接服务未就绪，请稍后重试', 'error');
+      return;
+    }
+    if (connected || dataChannel) {
+      showToast('已有活动连接，请先断开', 'warning');
+      return;
+    }
+  }
+
+  isInitiator = true;
+  dialingFriend = { name: '对方设备', deviceId: deviceId }; // 复用拨号超时与错误处理
+  switchTab('send');
+  hide('sendSetup');
+  hide('shareCodeStep');
+  hide('sendInterface');
+  show('connectingState');
+  const t = document.getElementById('connectingText');
+  if (t) t.textContent = '正在请求连接对方设备，等待对方确认...';
+
+  clearDialTimeout();
+  dialTimeout = setTimeout(() => failFriendDial('对方未响应（可能不在线或拒绝了请求）'), 25000);
+
+  // metadata 随信令送达，供对方在确认弹窗里看到本机名称（对端不可信，展示时转义）
+  const conn = peer.connect(PEER_PREFIX_DEV + deviceId, {
+    reliable: true,
+    metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
+  });
+  conn.on('open', () => {
+    if (!dialingFriend || dialingFriend.deviceId !== deviceId) { try { conn.close(); } catch (e) { /* noop */ } return; }
+    dialingFriend = null;
+    clearDialTimeout();
+    setupConnection(conn);
+  });
+  conn.on('close', () => {
+    if (dialingFriend && dialingFriend.deviceId === deviceId) failFriendDial('对方拒绝了连接请求');
+  });
+  conn.on('error', () => failFriendDial('连接失败，请稍后重试'));
+}
+
+// 入站请求确认弹窗（复用好友弹窗容器，overlay/Esc 关闭即视为拒绝）
+function showIncomingRequestModal(opts) {
+  const modal = document.getElementById('friendActionModal');
+  const title = document.getElementById('friendModalTitle');
+  const content = document.getElementById('friendModalContent');
+  const name = (opts.name || '').trim();
+  const safeName = name ? name.slice(0, 40) : ('设备 ' + (opts.callerId ? opts.callerId.slice(0, 8) : '未知'));
+
+  title.textContent = '连接请求';
+  content.innerHTML = `
+    <div class="text-center mb-6">
+      <div class="w-16 h-16 rounded-2xl bg-primary-500/15 flex items-center justify-center mx-auto mb-4">
+        <i class="fas fa-tower-broadcast text-2xl text-primary-500"></i>
+      </div>
+      <h4 class="font-semibold text-slate-800 mb-2">${esc(safeName)} 请求连接</h4>
+      <p class="text-sm text-slate-400">对方通过你的连接地址发起请求，确认后建立点对点加密连接</p>
+    </div>
+    <div class="space-y-3">
+      <button id="acceptConnectBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-check"></i>
+        接受连接
+      </button>
+      <button id="acceptFriendBtn" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-user-plus"></i>
+        接受并添加为好友
+      </button>
+      <button id="rejectConnectBtn" class="w-full py-3 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-xmark"></i>
+        拒绝
+      </button>
+    </div>`;
+
+  modal.classList.remove('hidden');
+  document.getElementById('acceptConnectBtn').onclick = () => {
+    pendingIncomingConn = null;
+    closeFriendModal();
+    opts.onAccept(false);
+  };
+  document.getElementById('acceptFriendBtn').onclick = () => {
+    pendingIncomingConn = null;
+    closeFriendModal();
+    opts.onAccept(true);
+  };
+  document.getElementById('rejectConnectBtn').onclick = () => {
+    pendingIncomingConn = null;
+    closeFriendModal();
+    opts.onReject();
+  };
+}
+
+// ==================== Tab Switching（Container Transform 版） ====================
+// 主页按钮不再跳转二级页：点击后按钮矩形插值放大为覆盖面板（主题色→白渐变），
+// 盖住其余按钮；退出反向收拢回按钮原位。面板已开时切换视图只换内容不重放动画
+let panelOpen = false;
+let panelAnimating = false;
+
+function switchTab(tab) {
+  if (tab === 'home') {
+    closePanel();
+    return;
+  }
+  currentTab = tab;
+  openPanel(tab);
+}
+
+function openHistory() {
+  renderHistory(); // 先渲染再展开，面板才能量到历史列表/空状态的真实高度
+  switchTab('history');
+}
+
+// 面板终态矩形：宽高贴合当前视图的实际内容（"适应有效显示信息大小"），
+// 以按钮网格为纵向锚点、视口内水平居中；内容超高才封顶并由面板内部滚动
+function measureEndRect() {
+  const panel = document.getElementById('containerPanel');
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxW = Math.min(1000, vw - 32);
+  const grid = document.getElementById('homeActionsGrid');
+  const gridTop = grid ? grid.getBoundingClientRect().top : 80;
+
+  const hadNoAnim = panel.classList.contains('no-anim');
+  panel.classList.add('no-anim');
+
+  // 第一遍：以最大宽度排版，量出可见内容的真实占用宽度（居中的 max-w 块只取自身宽度）
+  panel.style.width = maxW + 'px';
+  panel.style.height = 'auto';
+  panel.getBoundingClientRect();
+  let minL = Infinity, maxR = 0;
+  const mode = ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode']
+    .map(id => document.getElementById(id))
+    .find(m => m && !m.classList.contains('hidden'));
+  if (mode) {
+    for (const child of mode.children) {
+      if (child.classList.contains('hidden')) continue;
+      minL = Math.min(minL, child.offsetLeft);
+      maxR = Math.max(maxR, child.offsetLeft + child.offsetWidth);
+    }
+  }
+  const PAD_X = 48; // .panel-content 左右内边距合计
+  const endW = Math.max(420, Math.min(maxW, Math.ceil(maxR - minL) + PAD_X));
+
+  // 第二遍：以最终宽度排版取自然高度（变窄后文本换行可能变高）
+  panel.style.width = endW + 'px';
+  panel.getBoundingClientRect();
+  const naturalH = Math.round(panel.getBoundingClientRect().height);
+  const endH = Math.max(300, Math.min(naturalH, vh - 48));
+
+  if (!hadNoAnim) panel.classList.remove('no-anim');
+
+  const endX = Math.round((vw - endW) / 2);
+  let endY = Math.min(Math.max(Math.round(gridTop), 76), Math.round(vh * 0.35));
+  if (endY + endH > vh - 16) endY = Math.max(16, vh - 16 - endH);
+  return { x: endX, y: endY, w: endW, h: endH };
+}
+
+function applyRect(el, r) {
+  el.style.left = r.x + 'px';
+  el.style.top = r.y + 'px';
+  el.style.width = r.w + 'px';
+  el.style.height = r.h + 'px';
+}
+
+function activateMode(tab) {
+  ['friends', 'send', 'receive', 'history', 'localsend'].forEach(t => {
+    const mode = document.getElementById(t + 'Mode');
+    if (mode) mode.classList.toggle('hidden', t !== tab);
+  });
+}
+
+function openPanel(tab) {
+  const panel = document.getElementById('containerPanel');
+  if (!panel || panelAnimating) return;
+
+  activateMode(tab);
+  if (panelOpen) {
+    // 面板已展开：只切换内容，并把面板尺寸平滑过渡到新视图的实际大小
+    applyRect(panel, measureEndRect());
+    return;
+  }
+
+  const btn = document.querySelector('#homeSection .home-action-btn[data-view="' + tab + '"]');
+  if (!btn) return;
+
+  panelAnimating = true;
+  panelOpen = true;
+
+  // 先锁定滚动再取按钮矩形，避免滚动条消失造成起始位置抖动
+  document.body.style.overflow = 'hidden';
+  const rect = btn.getBoundingClientRect();
+
+  const ghost = document.getElementById('panelGhostLabel');
+  if (ghost) {
+    ghost.textContent = btn.textContent.trim();
+    ghost.style.fontSize = getComputedStyle(btn).fontSize;
+  }
+
+  const scrim = document.getElementById('panelScrim');
+  panel.hidden = false;
+  if (scrim) scrim.hidden = false;
+
+  panel.classList.add('no-anim');
+  panel.classList.remove('open');
+  const start = {
+    x: Math.round(rect.left), y: Math.round(rect.top),
+    w: Math.round(rect.width), h: Math.round(rect.height)
+  };
+  applyRect(panel, start);
+  panel.style.backgroundColor = '#6366f1'; // 与按钮渐变的靛蓝端一致，展开第一帧不跳色
+  const end = measureEndRect(); // 内部临时改宽高排版量内容，同步块内不产生中间绘制；量完保持 no-anim
+  applyRect(panel, start);      // 恢复起始矩形
+  panel.getBoundingClientRect(); // 强制回流：无过渡状态下固化起始矩形
+  panel.classList.remove('no-anim');
+  panel.getBoundingClientRect(); // 过渡已恢复，再次回流建立过渡基线
+  // FLIP：同一帧内写终态，浏览器自动补间（不依赖 rAF，后台页面也能正确落位）
+  panel.classList.add('open');
+  if (scrim) scrim.classList.add('visible');
+  applyRect(panel, end);
+  panel.style.backgroundColor = '#ffffff';
+
+  setTimeout(() => { panelAnimating = false; }, 480);
+}
+
+function closePanel() {
+  const panel = document.getElementById('containerPanel');
+  const scrim = document.getElementById('panelScrim');
+  if (!panel || !panelOpen || panelAnimating) return;
+
+  const btn = document.querySelector('#homeSection .home-action-btn[data-view="' + currentTab + '"]');
+  panelAnimating = true;
+
+  panel.classList.remove('open');
+  if (scrim) scrim.classList.remove('visible');
+
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    panel.style.backgroundColor = '#6366f1';
+    applyRect(panel, {
+      x: Math.round(rect.left), y: Math.round(rect.top),
+      w: Math.round(rect.width), h: Math.round(rect.height)
+    });
+  }
+
+  setTimeout(() => {
+    panel.hidden = true;
+    if (scrim) scrim.hidden = true;
+    document.body.style.overflow = '';
+    activateMode('none');
+    panelAnimating = false;
+    panelOpen = false;
+    currentTab = 'home';
+  }, 480);
+}
+
+function goHome() {
+  if (connected || dataChannel) {
+    showToast('请先断开连接后再返回主页', 'warning');
+    return;
+  }
+  if (dialingFriend || dialingCode) {
+    showToast('正在建立连接，请稍候', 'info');
+    return;
+  }
+  closePanel();
 }
 
 function switchContentType(type) {
@@ -1146,15 +2078,48 @@ function createPeer(peerId, kind) {
   });
 
   p.on('connection', (conn) => {
-    if (connected || dataChannel || dialingFriend || dialingCode) {
+    if (connected || dataChannel || dialingFriend || dialingCode || pendingIncomingConn) {
       try { conn.close(); } catch (e) { /* noop */ }
       showToast('已有连接正在处理，已拒绝新的连接请求', 'warning');
       return;
     }
-    // 角色判定：连接码 peer 的入站连接 = 接收方主动拨入，本端保持发送方；
-    // 设备 peer 的入站连接 = 好友直连拨入，本端为接收方
-    isInitiator = (kind === 'code');
-    setupConnection(conn);
+    // 连接码 peer 的入站连接 = 接收方主动拨入，本端保持发送方，无需确认
+    if (kind === 'code') {
+      isInitiator = true;
+      setupConnection(conn);
+      return;
+    }
+    // 设备 peer 的入站连接：好友直连直接接受；陌生设备（地址互连）弹确认把关
+    isInitiator = false;
+    const peerId = String(conn.peer || '');
+    const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+    const known = callerId && friends.find(f => f.deviceId === callerId);
+    if (known) {
+      setupConnection(conn);
+      return;
+    }
+    pendingIncomingConn = conn;
+    const discardIfGone = () => {
+      if (pendingIncomingConn !== conn) return;
+      pendingIncomingConn = null;
+      closeFriendModal(); // 内部会把无 pending 的情况安全跳过
+      showToast('对方的请求已取消', 'info');
+    };
+    conn.on('close', discardIfGone);
+    conn.on('error', discardIfGone);
+    const meta = conn.metadata || {};
+    showIncomingRequestModal({
+      callerId,
+      name: typeof meta.deviceName === 'string' ? meta.deviceName : '',
+      onAccept: (asFriend) => {
+        autoAddNextFriend = asFriend;
+        setupConnection(conn);
+      },
+      onReject: () => {
+        try { conn.close(); } catch (e) { /* noop */ }
+        showToast('已拒绝对方的连接请求', 'info');
+      }
+    });
   });
 
   // 信令服务器断线时自动重连（不影响已建立的 P2P 传输）
@@ -1239,8 +2204,8 @@ function handlePeerError(err, kind, p) {
 
 // ==================== Sender: Create Connection ====================
 function generateOffer() {
-  if (connected || dataChannel) {
-    showToast('已有活动连接，请先断开', 'warning');
+  if (connected || dataChannel || pendingIncomingConn) {
+    showToast('已有连接在处理，请先完成或断开', 'warning');
     return;
   }
 
@@ -1295,6 +2260,12 @@ function ensurePeerOpen(timeoutMs) {
   });
 }
 
+// 输满 6 位数字后自动发起连接，无需点击按钮；改错重输（仍为6位）同样会触发
+function onOfferCodeInput(el) {
+  el.value = el.value.replace(/[^0-9]/g, '');
+  if (/^\d{6}$/.test(el.value)) generateAnswer();
+}
+
 async function generateAnswer() {
   const inputEl = document.getElementById('offerCodeInput');
   const inputCode = (inputEl ? inputEl.value : '').trim();
@@ -1302,8 +2273,8 @@ async function generateAnswer() {
     showToast('请输入6位数字连接码', 'warning');
     return;
   }
-  if (connected || dataChannel) {
-    showToast('已有活动连接，请先断开', 'warning');
+  if (connected || dataChannel || pendingIncomingConn) {
+    showToast('已有连接在处理，请先完成或断开', 'warning');
     return;
   }
   if (!peer) {
@@ -1392,6 +2363,12 @@ function setupConnection(conn) {
     if (!dataChannel || dataChannel !== conn) return;
     updateConnectionStatus(true);
 
+    // 接受入站请求时可能停留在任意视图，切换到对应功能的容器视图
+    activateMode(isInitiator ? 'send' : 'receive');
+    if (currentTab !== (isInitiator ? 'send' : 'receive')) {
+      switchTab(isInitiator ? 'send' : 'receive');
+    }
+
     if (isInitiator) {
       hide('sendSetup');
       hide('connectingState');
@@ -1402,8 +2379,6 @@ function setupConnection(conn) {
       show('receiveInterface');
     }
 
-    hide('featuresSection');
-    hide('heroSection');
     showToast('连接已建立', 'success');
 
     // 握手：向对方交换真实设备身份（双向，双方都能把对方加为好友）
@@ -1529,7 +2504,19 @@ function onRemoteHello(msg) {
   if (rl) rl.textContent = label;
 
   const existing = friends.find(f => f.deviceId === remoteIdentity.deviceId);
-  if (!existing) {
+  if (existing) {
+    // 已是好友，无需提示
+  } else if (autoAddNextFriend) {
+    // 本端在确认弹窗选了"接受并添加为好友"
+    autoAddNextFriend = false;
+    addFriend(remoteIdentity.deviceName, remoteIdentity.deviceId);
+    showToast('已添加 ' + remoteIdentity.deviceName + ' 为好友', 'success');
+  } else if (dialPurpose === 'add-friend') {
+    // 本端以"添加好友"目的发起，hello 到达即自动添加
+    dialPurpose = 'connect';
+    addFriend(remoteIdentity.deviceName, remoteIdentity.deviceId);
+    showToast('已添加 ' + remoteIdentity.deviceName + ' 为好友', 'success');
+  } else {
     // 双向弹窗：发送方和接收方都会收到提示
     setTimeout(() => {
       if (connected && remoteIdentity && !friends.find(f => f.deviceId === remoteIdentity.deviceId)) {
@@ -1888,6 +2875,7 @@ async function sendFile(fileId) {
     renderFileQueue(true);
     showToast(`文件 "${item.name}" 已发送（${formatSpeed(file.size / (item.totalMs / 1000))}）`, 'success');
     updateFriendTransferByRemote();
+    addHistoryEntry({ dir: 'out', kind: 'file', name: item.name, size: item.size, peer: currentPeerName() });
   } catch (error) {
     console.error('Error sending file:', error);
     item.status = 'failed';
@@ -1973,6 +2961,12 @@ function sendTextMessage(content, kind) {
       }
       sendControl({ type: 'text-end', id: id });
     }
+    addHistoryEntry({
+      dir: 'out', kind: 'text',
+      name: kind === 'clipboard-content' ? '剪贴板内容' : '文本消息',
+      size: chars.length,
+      peer: currentPeerName()
+    });
     return true;
   } catch (e) {
     console.error('发送文本失败:', e);
@@ -2037,9 +3031,9 @@ function finishReceive(msg) {
     item.status = 'received';
     item.progress = 100;
     item.totalMs = Date.now() - (item._t0 || Date.now());
-    downloadFile(item.blob, item.name);
-    showToast(`文件 "${item.name}" 已接收（${formatSpeed(item.size / (item.totalMs / 1000))}）`, 'success');
+    saveReceivedBlob(item); // 已授权目录则直接写入，否则走浏览器下载
     updateFriendTransferByRemote();
+    addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: currentPeerName() });
   } else {
     item.status = 'failed';
     showToast(`文件 "${item.name}" 传输不完整（${formatFileSize(receivedBytes)}/${formatFileSize(item.size)}）`, 'error');
@@ -2171,6 +3165,7 @@ function showReceivedText(content, label) {
   `;
   container.prepend(textElement);
   showToast(`收到${label}`, 'success');
+  addHistoryEntry({ dir: 'in', kind: 'text', name: label, size: content.length, peer: currentPeerName() });
 }
 
 function copyTextToClipboard(button) {
@@ -2212,11 +3207,11 @@ function resetConnection() {
   remoteIdentity = null;
   dialingFriend = null;
   dialingCode = false;
+  autoAddNextFriend = false;
+  dialPurpose = 'connect';
 
   updateConnectionStatus(false);
 
-  show('heroSection');
-  show('featuresSection');
   show('sendSetup');
   show('generateCodeStep');
   hide('shareCodeStep');
@@ -2226,6 +3221,7 @@ function resetConnection() {
   hide('receiveConnecting');
   hide('receiveInterface');
   show('waitingState');
+  switchTab('home');
 
   const codeDisplay = document.getElementById('codeDisplay');
   if (codeDisplay) codeDisplay.textContent = '------';
@@ -2245,6 +3241,7 @@ function resetConnection() {
 }
 
 function updateConnectionStatus(isConnected) {
+  document.body.classList.toggle('is-connected', !!isConnected);
   const statusEl = document.getElementById('connectionStatus');
   if (!statusEl) return;
   if (isConnected) {
@@ -2275,6 +3272,152 @@ function toggleSettings() {
   document.getElementById('settingsModal').classList.toggle('hidden');
 }
 
+// ==================== Download Directory (File System Access API) ====================
+// 网页无法静默写任意路径，只有 File System Access API 能让用户显式授权一个目录，
+// 之后接收的文件直接流式写入该目录；未授权或浏览器不支持时回退到普通下载。
+// 目录句柄是结构化对象，不能进 localStorage，只能存 IndexedDB；
+// 浏览器安全模型规定：页面重载后句柄权限退回 prompt，需要用户手势才能恢复
+let downloadDirHandle = null;
+const PREFS_DB = 'easydrop_prefs';
+
+function openPrefsDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PREFS_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('handles');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveDirHandle(handle) {
+  try {
+    const db = await openPrefsDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(handle, 'downloadDir');
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) {
+    console.warn('保存目录句柄失败:', e);
+  }
+}
+
+async function loadDirHandle() {
+  try {
+    const db = await openPrefsDb();
+    const handle = await new Promise((resolve, reject) => {
+      const req = db.transaction('handles', 'readonly').objectStore('handles').get('downloadDir');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return handle;
+  } catch (e) {
+    return null;
+  }
+}
+
+function updateDownloadDirUI() {
+  const display = document.getElementById('downloadDirDisplay');
+  const hint = document.getElementById('downloadDirHint');
+  const btn = document.getElementById('changeDirBtn');
+  if (!display) return;
+  if (!('showDirectoryPicker' in window)) {
+    display.value = '当前浏览器不支持自选目录';
+    if (hint) hint.textContent = 'Chrome / Edge 支持选择下载目录，其他浏览器将使用默认下载';
+    if (btn) btn.disabled = true;
+  } else if (downloadDirHandle) {
+    display.value = downloadDirHandle.name;
+    if (hint) hint.textContent = '接收的文件将直接保存到该目录（页面重载后首次保存可能需要重新授权）';
+  } else {
+    display.value = '浏览器默认下载';
+    if (hint) hint.textContent = '文件将保存到浏览器默认下载目录';
+  }
+}
+
+async function chooseDownloadDir() {
+  if (!('showDirectoryPicker' in window)) {
+    showToast('当前浏览器不支持选择目录，将使用默认下载', 'warning');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    downloadDirHandle = handle;
+    await saveDirHandle(handle);
+    updateDownloadDirUI();
+    showToast('下载目录已设置为 ' + handle.name, 'success');
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // 用户在目录选择框里点了取消
+    console.warn('选择目录失败:', e);
+    showToast('选择目录失败：' + (e.message || e.name || '未知错误'), 'error');
+  }
+}
+
+async function ensureDirPermission(handle) {
+  try {
+    if ((await handle.queryPermission({ mode: 'readwrite' })) === 'granted') return true;
+    // requestPermission 需要用户激活（点击等手势），非手势场景会被拒绝
+    if ((await handle.requestPermission({ mode: 'readwrite' })) === 'granted') return true;
+  } catch (e) { /* noop */ }
+  return false;
+}
+
+// 文件名净化：对端可控的名称不能带路径分隔符等字符，避免写入位置逃逸
+function sanitizeFilename(name) {
+  const clean = String(name || 'received-file').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  return clean || 'received-file';
+}
+
+// 同名文件自动加 " (1)"、" (2)" 后缀，与浏览器下载的防覆盖行为一致
+async function uniqueDirFilename(dir, filename) {
+  let candidate = filename;
+  const dot = filename.lastIndexOf('.');
+  const base = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : '';
+  for (let i = 1; ; i++) {
+    try {
+      await dir.getFileHandle(candidate, { create: false });
+    } catch (e) {
+      return candidate; // 不存在，可直接使用
+    }
+    candidate = `${base} (${i})${ext}`;
+  }
+}
+
+async function saveBlobToDir(blob, filename) {
+  if (!downloadDirHandle) return false;
+  if (!(await ensureDirPermission(downloadDirHandle))) {
+    downloadDirHandle = null;
+    updateDownloadDirUI();
+    showToast('下载目录授权已失效，本次改用浏览器下载', 'warning');
+    return false;
+  }
+  try {
+    const name = await uniqueDirFilename(downloadDirHandle, sanitizeFilename(filename));
+    const fileHandle = await downloadDirHandle.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await blob.stream().pipeTo(writable); // pipeTo 完成后自动关闭并落盘
+    return true;
+  } catch (e) {
+    console.warn('写入下载目录失败:', e);
+    showToast('写入目录失败，已回退到浏览器下载', 'warning');
+    return false;
+  }
+}
+
+async function saveReceivedBlob(item) {
+  const speed = formatSpeed(item.size / ((item.totalMs || 1) / 1000));
+  const saved = await saveBlobToDir(item.blob, item.name);
+  if (saved && downloadDirHandle) {
+    showToast(`文件 "${item.name}" 已保存到 ${downloadDirHandle.name}（${speed}）`, 'success');
+  } else {
+    downloadFile(item.blob, sanitizeFilename(item.name));
+    showToast(`文件 "${item.name}" 已接收（${speed}）`, 'success');
+  }
+}
+
 // ==================== Settings ====================
 function loadSettingsUI() {
   const dn = document.getElementById('deviceName');
@@ -2287,6 +3430,7 @@ function loadSettingsUI() {
   }
   const di = document.getElementById('deviceIdDisplay');
   if (di) di.textContent = myDeviceId;
+  updateDownloadDirUI();
 }
 
 function saveSettings() {
@@ -2301,8 +3445,34 @@ function saveSettings() {
   if (stun) {
     try { localStorage.setItem('easydrop_stun', stun); } catch (e) { /* noop */ }
   }
+  updateHomeInfo();
   showToast('设置已保存，连接相关设置将在下次建立连接时生效', 'success');
   toggleSettings();
+}
+
+// ==================== Home Info ====================
+// 主页信息胶囊：网络类型（Network Information API，Safari/Firefox 不支持时回退在线状态）
+function updateHomeInfo() {
+  const dn = document.getElementById('homeDeviceName');
+  if (dn) dn.textContent = myDeviceName || '我的设备';
+
+  const net = document.getElementById('homeNetwork');
+  if (net) {
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    let label;
+    if (navigator.onLine === false) {
+      label = '离线';
+    } else if (c) {
+      const eff = (c.effectiveType || '').toUpperCase();
+      if (c.type === 'wifi') label = 'Wi-Fi';
+      else if (c.type === 'ethernet') label = '以太网';
+      else if (c.type === 'cellular') label = eff ? `移动网络 (${eff})` : '移动网络';
+      else label = eff || '在线';
+    } else {
+      label = '在线';
+    }
+    net.textContent = label;
+  }
 }
 
 function showToast(message, type = 'info') {
@@ -2345,7 +3515,59 @@ document.addEventListener('DOMContentLoaded', () => {
   renderFriendsList();
   setupFileInput();
   loadSettingsUI();
+  const fy = document.getElementById('footerYear');
+  if (fy) fy.textContent = String(new Date().getFullYear());
+  loadHistory();
+  // 四个功能视图常驻 Container Transform 面板，主页按钮点击时展开
+  const panelContent = document.getElementById('panelContent');
+  ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) panelContent.appendChild(el);
+  });
+  updateHomeInfo();
+  window.addEventListener('resize', () => {
+    // 面板开着时窗口尺寸变化，重新计算贴合内容的矩形避免悬空
+    if (panelOpen && !panelAnimating) {
+      applyRect(document.getElementById('containerPanel'), measureEndRect());
+    }
+  });
+  window.addEventListener('online', updateHomeInfo);
+  window.addEventListener('offline', updateHomeInfo);
+  const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (netInfo && netInfo.addEventListener) netInfo.addEventListener('change', updateHomeInfo);
+  // 恢复上次授权的下载目录句柄（权限若已退回 prompt，首次保存时会回退浏览器下载）
+  loadDirHandle().then(h => {
+    if (h) {
+      downloadDirHandle = h;
+      updateDownloadDirUI();
+    }
+  });
   initializePeer();
+  renderDeviceAddress();
+  updateLanIpDisplay().then(() => initLanDiscovery());
+  // LocalSend 列表定期刷新：TTL 过期的设备离线消失，状态行的发现数同步
+  setInterval(() => {
+    const mode = document.getElementById('localsendMode');
+    if (mode && !mode.classList.contains('hidden')) {
+      renderLocalsendList();
+      refreshLanStatus();
+    }
+  }, 5000);
+
+  // 地址栏带 ?connect=：点开对方分享的地址即自动发起请求（对方仍需确认）
+  try {
+    const params = new URLSearchParams(location.search);
+    const connectTarget = safeId(params.get(CONNECT_PARAM) || '');
+    if (connectTarget) {
+      try { history.replaceState(null, '', location.pathname); } catch (e) { /* noop */ }
+      if (connectTarget === myDeviceId) {
+        showToast('这是本设备的连接地址', 'info');
+      } else {
+        showToast('检测到连接请求，正在发起...', 'info');
+        setTimeout(() => dialDevice(connectTarget), 800);
+      }
+    }
+  } catch (e) { /* noop */ }
 
   document.getElementById('settingsModal').addEventListener('click', (e) => {
     if (e.target.id === 'settingsModal') {
@@ -2363,6 +3585,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') {
       document.getElementById('settingsModal').classList.add('hidden');
       closeFriendModal();
+      goHome();
     }
   });
 
