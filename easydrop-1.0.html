@@ -1538,6 +1538,12 @@ const LAN_BROKERS = [
 ];
 let lanBrokerIdx = 0;
 let lanBrokerTryTimer = null;
+// 自建信标总线（Cloudflare Pages Functions + DO 广播房间，443/WSS）：
+// 生产环境直接用页面同源域名，本地调试走固定线上地址
+const LAN_WS_BUS_FALLBACK = 'wss://easydrop-ady.pages.dev';
+let lanWs = null;
+let lanWsTimer = null;
+let lanWsAttempts = 0;
 
 function lanTopic(subnet) {
   return LAN_TOPIC_PREFIX + (subnet || 'unknown') + '/beacon';
@@ -1558,10 +1564,79 @@ function refreshLanStatus() {
 
 function initLanDiscovery() {
   lanSubnet = lanIpCache ? lanIpCache.replace(/\.\d+$/, '.x') : 'unknown';
-  if (typeof mqtt === 'undefined') {
-    updateLanNetStatus('局域网发现不可用（组件加载失败，检查网络后刷新）');
+  tryLanWsBus();
+}
+
+function lanWsBusUrl() {
+  const base = (location.protocol === 'https:' && location.hostname.endsWith('.pages.dev'))
+    ? location.origin.replace(/^http/, 'ws')
+    : LAN_WS_BUS_FALLBACK;
+  // lanTopic 无前导斜杠（MQTT 主题用法），拼 URL 需补上
+  return base.replace(/\/$/, '') + '/' + lanTopic(lanSubnet);
+}
+
+// 统一的信标消息处理（自建 WS 总线与 MQTT 两条通道共用）
+function handleLanBeaconPayload(text) {
+  try {
+    const msg = JSON.parse(text);
+    const id = safeId(msg.id);
+    if (!id || id === myDeviceId) return;
+    const name = (typeof msg.name === 'string' && msg.name.trim())
+      ? msg.name.trim().slice(0, 40) : '未知设备';
+    lanPeers.set(id, { id: id, name: name, ts: Date.now() });
+    renderLocalsendList();
+    refreshLanStatus();
+  } catch (e) { /* 忽略畸形信标 */ }
+}
+
+function tryLanWsBus() {
+  updateLanNetStatus('局域网发现连接中（自建总线）...');
+  let ws;
+  try {
+    ws = new WebSocket(lanWsBusUrl());
+  } catch (e) {
+    fallbackToMqtt();
     return;
   }
+  lanWs = ws;
+  const guard = setTimeout(() => {
+    // 8 秒没握手完成就放弃，转入 MQTT 轮换
+    if (lanWs === ws && ws.readyState === WebSocket.CONNECTING) {
+      try { ws.close(); } catch (e) { /* noop */ }
+    }
+  }, 8000);
+  ws.onopen = () => {
+    clearTimeout(guard);
+    lanWsAttempts = 0;
+    lanBrokerOk = true;
+    publishLanBeacon();
+    if (lanWsTimer) clearInterval(lanWsTimer);
+    lanWsTimer = setInterval(publishLanBeacon, LAN_BEACON_INTERVAL);
+    refreshLanStatus();
+  };
+  ws.onmessage = ev => handleLanBeaconPayload(String(ev.data));
+  ws.onclose = () => {
+    if (lanWs !== ws) return; // 已被新连接取代
+    lanWs = null;
+    lanBrokerOk = false;
+    if (lanWsTimer) { clearInterval(lanWsTimer); lanWsTimer = null; }
+    lanWsAttempts++;
+    if (lanWsAttempts <= 2) {
+      updateLanNetStatus('自建总线重连中...');
+      setTimeout(tryLanWsBus, 2000);
+    } else {
+      fallbackToMqtt();
+    }
+  };
+  ws.onerror = () => { /* close 会跟随触发 */ };
+}
+
+function fallbackToMqtt() {
+  if (typeof mqtt === 'undefined') {
+    updateLanNetStatus('局域网发现不可用（自建总线与组件均不可达）');
+    return;
+  }
+  updateLanNetStatus('自建总线不可达，切换公共 broker...');
   try {
     const saved = parseInt(localStorage.getItem('easydrop_lan_broker') || '0', 10);
     if (saved >= 0 && saved < LAN_BROKERS.length) lanBrokerIdx = saved;
@@ -1597,16 +1672,7 @@ function lanConnect() {
     refreshLanStatus();
   });
   client.on('message', (topic, payload) => {
-    try {
-      const msg = JSON.parse(payload.toString());
-      const id = safeId(msg.id);
-      if (!id || id === myDeviceId) return; // broker 会把自家信标回显给自己，过滤
-      const name = (typeof msg.name === 'string' && msg.name.trim())
-        ? msg.name.trim().slice(0, 40) : '未知设备';
-      lanPeers.set(id, { id: id, name: name, ts: Date.now() });
-      renderLocalsendList();
-      refreshLanStatus();
-    } catch (e) { /* 忽略畸形信标 */ }
+    handleLanBeaconPayload(payload.toString());
   });
   client.on('close', () => {
     if (lanBeaconClient !== client) return; // 已切换到下一个 broker
@@ -1631,10 +1697,14 @@ function scheduleLanRetry() {
 }
 
 function publishLanBeacon() {
-  if (!lanBeaconClient || !lanBeaconClient.connected) return;
-  try {
-    lanBeaconClient.publish(lanTopic(lanSubnet), JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() }), { qos: 0 });
-  } catch (e) { /* noop */ }
+  const payload = JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() });
+  if (lanWs && lanWs.readyState === WebSocket.OPEN) {
+    try { lanWs.send(payload); } catch (e) { /* noop */ }
+    return;
+  }
+  if (lanBeaconClient && lanBeaconClient.connected) {
+    try { lanBeaconClient.publish(lanTopic(lanSubnet), payload, { qos: 0 }); } catch (e) { /* noop */ }
+  }
 }
 
 function lanPeersLive() {

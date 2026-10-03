@@ -1,0 +1,12 @@
+name = "easydrop-beacon"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "BEACON_ROOM"
+class_name = "BeaconRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BeaconRoom"]

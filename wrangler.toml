@@ -1,0 +1,13 @@
+# Cloudflare Pages 项目配置
+# 信标总线入口 = Pages Function（全捕获路由），Durable Object 房间实现在
+# 独立 Worker easydrop-beacon 里（Pages 的 DO 绑定必须指定 script_name）
+# 部署：把 functions/ 与页面 HTML 放进 .deploy-cloudflare/ 后执行
+#   npx wrangler pages deploy
+name = "easydrop"
+pages_build_output_dir = ".deploy-cloudflare"
+compatibility_date = "2024-12-01"
+
+[[durable_objects.bindings]]
+name = "BEACON_ROOM"
+class_name = "BeaconRoom"
+script_name = "easydrop-beacon"
