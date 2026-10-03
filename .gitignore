@@ -1,0 +1,5 @@
+# wrangler 本地缓存（含账号信息）
+.wrangler/
+
+# Pages 部署暂存目录（内容来自仓库内文件拼装）
+.deploy-cloudflare/
