@@ -4,6 +4,10 @@
 
 const ENC = new TextEncoder();
 const DEC = new TextDecoder();
+const USERNAME_RE = /^[a-z0-9]{1,8}$/;
+const PASSWORD_RULES = [/\d/, /[a-z]/, /[A-Z]/, /[!-\/:-@\[-`{-~]/];
+const PASSWORD_MAX_LEN = 16;
+const PASSWORD_MIN_CLASSES = 2;
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -81,31 +85,33 @@ export default {
 
     // ==================== Auth ====================
     if (path === '/api/auth/register' && method === 'POST') {
-      const { email, password, name } = await request.json().catch(() => ({}));
-      if (!email || !password) return err('缺少 email 或密码');
-      const emailKey = `user:email:${email.toLowerCase()}`;
-      if (await getKV(env, emailKey)) return err('该邮箱已注册');
+      const { username, password, name } = await request.json().catch(() => ({}));
+      if (!username || !password) return err('缺少用户名或密码');
+      if (!USERNAME_RE.test(username)) return err('用户名只能包含数字和小写字母，且不超过 8 位');
+      if (password.length > PASSWORD_MAX_LEN || PASSWORD_RULES.filter(rule => rule.test(password)).length < PASSWORD_MIN_CLASSES) return err('密码需至少包含数字、大写字母、小写字母、符号中的 2 类，且不超过 16 位');
+      const usernameKey = `user:username:${username}`;
+      if (await getKV(env, usernameKey)) return err('该用户名已被注册');
       const userId = 'u_' + crypto.randomUUID();
       const user = {
         id: userId,
-        email: email.toLowerCase(),
-        name: name || email.split('@')[0],
+        username,
+        name: name || username,
         passwordHash: sha256Hex(password),
         createdAt: Date.now(),
       };
-      await setKV(env, emailKey, user);
+      await setKV(env, usernameKey, user);
       await setKV(env, `user:id:${userId}`, user);
-      const token = makeJwt({ sub: userId, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
-      return json({ token, user: { id: userId, email: user.email, name: user.name } });
+      const token = makeJwt({ sub: userId, username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: userId, username, name: user.name } });
     }
 
     if (path === '/api/auth/login' && method === 'POST') {
-      const { email, password } = await request.json().catch(() => ({}));
-      if (!email || !password) return err('缺少 email 或密码');
-      const user = await getKV(env, `user:email:${email.toLowerCase()}`);
-      if (!user || user.passwordHash !== sha256Hex(password)) return err('邮箱或密码错误', 401);
-      const token = makeJwt({ sub: user.id, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
-      return json({ token, user: { id: user.id, email: user.email, name: user.name } });
+      const { username, password } = await request.json().catch(() => ({}));
+      if (!username || !password) return err('缺少用户名或密码');
+      const user = await getKV(env, `user:username:${username}`);
+      if (!user || user.passwordHash !== sha256Hex(password)) return err('用户名或密码错误', 401);
+      const token = makeJwt({ sub: user.id, username: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: user.id, username: user.username, name: user.name } });
     }
 
     if (path === '/api/auth/me' && method === 'GET') {
@@ -114,7 +120,7 @@ export default {
       if (!payload) return err('未登录或 token 已过期', 401);
       const user = await getKV(env, `user:id:${payload.sub}`);
       if (!user) return err('用户不存在', 404);
-      return json({ user: { id: user.id, email: user.email, name: user.name } });
+      return json({ user: { id: user.id, username: user.username, name: user.name } });
     }
 
     // ==================== Auth 中间件 ====================

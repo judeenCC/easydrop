@@ -7,5 +7,3 @@ workers_dev = true
 binding = "EASYDROP_KV"
 id = "c19e48ba204a47538b3e60e26af921e2"
 
-[vars]
-JWT_SECRET = "easydrop-dev-secret-change-me"

@@ -73,19 +73,18 @@ tailwind.config = {
     100% { transform: scale(1.4); opacity: 0; }
   }
 
-  .animate-fade-in { animation: fadeIn 0.5s ease-in-out; }
-  .animate-slide-up { animation: slideUp 0.4s ease-out; }
-  .animate-float { animation: float 3s ease-in-out infinite; }
+  .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+  .animate-slide-up { animation: slideUp 0.3s ease-out; }
 
   .drop-zone {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: border-color 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
     border: 2px dashed rgba(99, 102, 241, 0.25);
     background: rgba(99, 102, 241, 0.02);
   }
   .drop-zone.dragover {
     border-color: rgba(99, 102, 241, 0.6);
     background: rgba(99, 102, 241, 0.08);
-    transform: scale(1.01);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
   }
 
   .progress-bar {
@@ -102,13 +101,9 @@ tailwind.config = {
   }
   .pulse-ring {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    inset: 0;
     border: 2px solid rgba(99, 102, 241, 0.4);
     border-radius: 50%;
-    width: 100%;
-    height: 100%;
     animation: pulse-ring 2s ease-out infinite;
     pointer-events: none;
   }
@@ -137,6 +132,8 @@ tailwind.config = {
   .code-input {
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.5em;
+    /* 抵消末尾字间距，否则居中的验证码会向左偏移 */
+    padding-left: 0.5em;
     text-align: center;
     font-size: 2rem;
     font-weight: 600;
@@ -185,10 +182,9 @@ tailwind.config = {
   .btn-primary:hover {
     background: linear-gradient(135deg, #4f46e5, #0e7490);
     box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
-    transform: translateY(-1px);
   }
   .btn-primary:active {
-    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
   }
 
   .friend-avatar {
@@ -196,11 +192,11 @@ tailwind.config = {
   }
 
   .friend-card {
-    transition: all 0.3s ease;
+    transition: background-color 0.25s ease, box-shadow 0.25s ease;
   }
   .friend-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    background-color: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   }
 
   .modal-overlay {
@@ -232,15 +228,19 @@ tailwind.config = {
     color: #64748b;
   }
 
-  /* ==== 主页分段式标签页 ==== */
+  /* ==== 主页分段式标签页：四等分铺满，窄屏不溢出、不偏移 ==== */
   .seg-tab {
-    padding: 0.625rem 1.375rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 0.5rem 0.25rem;
     border-radius: 9999px;
-    font-size: 0.9rem;
+    font-size: 0.8125rem;
     font-weight: 500;
     color: #64748b;
     white-space: nowrap;
-    transition: all 0.25s ease;
+    transition: background-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
   }
   .seg-tab:hover { color: #334155; }
   .seg-tab.active {
@@ -249,7 +249,32 @@ tailwind.config = {
     box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
   }
   @media (min-width: 640px) {
-    .seg-tab { padding: 0.625rem 1.75rem; font-size: 1rem; }
+    .seg-tab { padding: 0.625rem 1rem; font-size: 0.9375rem; }
+  }
+
+  /* ==== 布局基础：统一内容宽度，避免切换视图时左右跳动 ==== */
+  .page-panel {
+    width: 100%;
+    max-width: 48rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .panel-card {
+    padding: 1.25rem;
+  }
+  @media (min-width: 640px) {
+    .panel-card { padding: 2rem; }
+  }
+  .modal-panel {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-ring, .status-dot::after, .progress-bar, .animate-fade-in, .animate-slide-up, .toast {
+      animation: none !important;
+    }
+    .friend-card, .btn-primary, .drop-zone { transition: none !important; }
   }
 </style>
 </head>
@@ -257,9 +282,9 @@ tailwind.config = {
 
 <!-- Background decorative elements -->
 <div class="fixed inset-0 overflow-hidden pointer-events-none">
-  <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-500/8 rounded-full blur-3xl animate-float"></div>
-  <div class="absolute top-1/2 -left-40 w-96 h-96 bg-accent-500/8 rounded-full blur-3xl animate-float" style="animation-delay: 1s;"></div>
-  <div class="absolute -bottom-40 right-1/3 w-96 h-96 bg-purple-500/6 rounded-full blur-3xl animate-float" style="animation-delay: 2s;"></div>
+  <div class="absolute -top-40 -right-40 w-96 h-96 bg-primary-500/8 rounded-full blur-3xl"></div>
+  <div class="absolute top-1/2 -left-40 w-96 h-96 bg-accent-500/8 rounded-full blur-3xl"></div>
+  <div class="absolute -bottom-40 right-1/3 w-96 h-96 bg-purple-500/6 rounded-full blur-3xl"></div>
 </div>
 
 <!-- Main Container -->
@@ -305,24 +330,24 @@ tailwind.config = {
   </header>
 
   <!-- Main Content -->
-  <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-8">
+  <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
 
     <!-- ==================== 主页（分段式标签页） ==================== -->
-    <div id="homeSection" class="animate-fade-in flex-1 flex flex-col min-h-0">
+    <div id="homeSection" class="animate-fade-in flex flex-col">
 
       <!-- Hero Section -->
-      <div id="heroSection" class="text-center mb-6">
-        <h2 class="text-4xl md:text-5xl font-bold mb-4 gradient-text">
+      <div id="heroSection" class="text-center mb-6 sm:mb-8">
+        <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold mb-3 sm:mb-4 gradient-text leading-tight">
           随时随地，极速传输
         </h2>
-        <p class="text-slate-500 text-lg max-w-2xl mx-auto">
+        <p class="text-slate-500 text-sm sm:text-base lg:text-lg page-panel leading-relaxed">
           基于 WebRTC 点对点技术，支持跨网络传输任意类型文件，安全、快速、无需注册
         </p>
       </div>
 
-      <!-- 分段式标签栏 -->
-      <div class="flex justify-center mb-8">
-        <div id="mainTabs" class="glass rounded-full p-1.5 inline-flex gap-1 max-w-full overflow-x-auto">
+      <!-- 分段式标签栏：四等分，宽度固定居中 -->
+      <div class="mb-6 sm:mb-8">
+        <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-4 gap-1 w-full max-w-xl mx-auto">
           <button onclick="onTabClick('friends')" data-tab="friends" class="seg-tab">好友列表</button>
           <button onclick="onTabClick('send')" data-tab="send" class="seg-tab">我要发送</button>
           <button onclick="onTabClick('receive')" data-tab="receive" class="seg-tab">我要接收</button>
@@ -330,16 +355,16 @@ tailwind.config = {
         </div>
       </div>
 
-      <!-- 标签内容区：各功能视图由 JS 在初始化时移入此处 -->
-      <div id="tabContent" class="flex-1 min-h-0 overflow-y-auto">
+      <!-- 标签内容区：各功能视图由 JS 在初始化时移入此处（页面整体滚动，不使用嵌套滚动） -->
+      <div id="tabContent" class="w-full">
       </div>
 
     </div>
 
     <!-- Friends Mode -->
     <div id="friendsMode" class="hidden animate-fade-in">
-      <div class="max-w-4xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
+      <div class="page-panel">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">我的好友</h3>
             <p class="text-sm text-slate-400">点击好友直接发起传输，无需重复输入连接码</p>
@@ -354,7 +379,7 @@ tailwind.config = {
           <!-- Friends will be rendered here -->
         </div>
 
-        <div id="friendsEmptyState" class="glass-strong rounded-3xl p-12 text-center hidden">
+        <div id="friendsEmptyState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center hidden">
           <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
             <i class="fas fa-user-plus text-3xl text-primary-500"></i>
           </div>
@@ -400,8 +425,8 @@ tailwind.config = {
 
     <!-- Send Mode -->
     <div id="sendMode" class="hidden animate-fade-in">
-      <div id="sendSetup" class="max-w-2xl mx-auto">
-        <div class="glass-strong rounded-3xl p-8">
+      <div id="sendSetup" class="page-panel">
+        <div class="glass-strong rounded-3xl panel-card">
           <div class="text-center mb-6">
             <div class="pulse-wrapper inline-block mb-4">
               <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500/15 to-accent-500/15 flex items-center justify-center relative z-10">
@@ -428,7 +453,7 @@ tailwind.config = {
             <div class="bg-slate-50 rounded-2xl p-6 mb-4 border border-slate-200">
               <p class="text-xs text-slate-400 mb-3 text-center">将此6位连接码发送给接收方</p>
               <div class="flex items-center justify-center gap-2 mb-4">
-                <div id="codeDisplay" class="code-display text-4xl font-bold gradient-text tracking-widest">
+                <div id="codeDisplay" class="code-display text-3xl sm:text-4xl font-bold gradient-text tracking-widest pl-[0.1em]">
                   ------
                 </div>
                 <button onclick="copyCode()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
@@ -456,8 +481,8 @@ tailwind.config = {
         </div>
       </div>
 
-      <div id="sendInterface" class="hidden max-w-4xl mx-auto">
-        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between">
+      <div id="sendInterface" class="hidden page-panel">
+        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
               <i class="fas fa-check text-green-500"></i>
@@ -489,8 +514,8 @@ tailwind.config = {
         </div>
 
         <div id="fileSendArea">
-          <div id="dropZone" class="drop-zone rounded-3xl p-12 text-center cursor-pointer mb-6" onclick="document.getElementById('fileInput').click()">
-            <div class="w-20 h-20 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center animate-float">
+          <div id="dropZone" class="drop-zone rounded-3xl p-6 sm:p-12 text-center cursor-pointer mb-6" onclick="document.getElementById('fileInput').click()">
+            <div class="w-20 h-20 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center">
               <i class="fas fa-cloud-arrow-up text-3xl text-primary-500"></i>
             </div>
             <h3 class="text-xl font-semibold mb-2 text-slate-700">拖放文件到此处</h3>
@@ -537,8 +562,8 @@ tailwind.config = {
 
     <!-- Receive Mode -->
     <div id="receiveMode" class="hidden animate-fade-in">
-      <div id="receiveSetup" class="max-w-2xl mx-auto">
-        <div class="glass-strong rounded-3xl p-8">
+      <div id="receiveSetup" class="page-panel">
+        <div class="glass-strong rounded-3xl panel-card">
           <div class="text-center mb-6">
             <div class="pulse-wrapper inline-block mb-4">
               <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center relative z-10">
@@ -568,8 +593,8 @@ tailwind.config = {
         <p class="text-slate-500" id="receiveConnectingText">正在连接发送方...</p>
       </div>
 
-      <div id="receiveInterface" class="hidden max-w-4xl mx-auto">
-        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between">
+      <div id="receiveInterface" class="hidden page-panel">
+        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
               <i class="fas fa-check text-green-500"></i>
@@ -585,8 +610,8 @@ tailwind.config = {
           </button>
         </div>
 
-        <div id="waitingState" class="glass-strong rounded-3xl p-12 text-center">
-          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center animate-float">
+        <div id="waitingState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center">
+          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center">
             <i class="fas fa-hourglass-half text-3xl text-accent-500"></i>
           </div>
           <h3 class="text-xl font-semibold mb-2 text-slate-700">等待接收文件</h3>
@@ -598,10 +623,10 @@ tailwind.config = {
     </div>
 
     <!-- Features Section：mt-auto 沉底，贴近页脚；pt-6 保证内容溢出滚动时与上方内容仍有最小间距 -->
-    <div id="featuresSection" class="mt-auto pt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+    <div id="featuresSection" class="mt-10 sm:mt-14 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+      <div class="glass rounded-2xl p-5 sm:p-6">
         <div class="flex items-center gap-5">
-          <div class="w-20 h-20 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+          <div class="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-globe text-primary-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -610,9 +635,9 @@ tailwind.config = {
           </div>
         </div>
       </div>
-      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+      <div class="glass rounded-2xl p-5 sm:p-6">
         <div class="flex items-center gap-5">
-          <div class="w-20 h-20 rounded-2xl bg-accent-500/15 flex items-center justify-center flex-shrink-0">
+          <div class="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-accent-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-shield-halved text-accent-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -621,9 +646,9 @@ tailwind.config = {
           </div>
         </div>
       </div>
-      <div class="glass rounded-2xl p-6 hover:bg-white/90 transition-all">
+      <div class="glass rounded-2xl p-5 sm:p-6">
         <div class="flex items-center gap-5">
-          <div class="w-20 h-20 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
+          <div class="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-users text-purple-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
@@ -636,8 +661,8 @@ tailwind.config = {
 
     <!-- History Mode -->
     <div id="historyMode" class="hidden animate-fade-in">
-      <div class="max-w-4xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
+      <div class="page-panel">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">历史对话</h3>
             <p class="text-sm text-slate-400">本机最近的收发记录，仅保存在本地浏览器</p>
@@ -650,7 +675,7 @@ tailwind.config = {
 
         <div id="historyList" class="space-y-3"></div>
 
-        <div id="historyEmptyState" class="glass-strong rounded-3xl p-12 text-center hidden">
+        <div id="historyEmptyState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center hidden">
           <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
             <i class="fas fa-clock-rotate-left text-3xl text-primary-500"></i>
           </div>
@@ -662,7 +687,7 @@ tailwind.config = {
 
     <!-- LocalSend Mode：LocalSend 式速传——选设备直连，拖入文件即发 -->
     <div id="localsendMode" class="hidden animate-fade-in">
-      <div class="max-w-2xl mx-auto">
+      <div class="page-panel">
         <div class="text-center mb-5">
           <h3 class="text-xl font-semibold text-slate-800">LocalSend 速传</h3>
           <p class="text-slate-400 text-sm mt-1">选择设备即直连，拖入文件立即发送</p>
@@ -720,8 +745,8 @@ tailwind.config = {
 
 <!-- Settings Modal -->
 <div id="settingsModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay">
-  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
-    <div class="flex items-center justify-between mb-6">
+  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up modal-panel">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
       <h3 class="text-lg font-semibold text-slate-800">设置</h3>
       <button onclick="toggleSettings()" class="w-8 h-8 rounded-lg glass hover:bg-slate-100 flex items-center justify-center">
         <i class="fas fa-xmark text-slate-500"></i>
@@ -756,8 +781,8 @@ tailwind.config = {
 
 <!-- Friend Action Modal -->
 <div id="friendActionModal" class="hidden fixed inset-0 z-[70] flex items-center justify-center p-4 modal-overlay">
-  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up">
-    <div class="flex items-center justify-between mb-6">
+  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up modal-panel">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
       <h3 class="text-lg font-semibold text-slate-800" id="friendModalTitle">好友操作</h3>
       <button onclick="closeFriendModal()" class="w-8 h-8 rounded-lg glass hover:bg-slate-100 flex items-center justify-center">
         <i class="fas fa-xmark text-slate-500"></i>
@@ -770,7 +795,7 @@ tailwind.config = {
 </div>
 
 <!-- Toast Container -->
-<div id="toastContainer" class="fixed bottom-6 right-6 z-[80] space-y-3"></div>
+<div id="toastContainer" class="fixed inset-x-4 bottom-4 sm:inset-x-auto sm:bottom-6 sm:right-6 z-[80] space-y-3 flex flex-col items-stretch sm:items-end"></div>
 
 <script>
 // ==================== Global State ====================
@@ -809,7 +834,7 @@ let receivedBytes = 0;
 const textAssembly = {};         // 长文本分片重组缓冲
 
 // ==================== 账号与云同步 ====================
-let apiBase = '';                // 账号 Worker 基地址，部署后填写，如 https://easydrop-account.xxx.workers.dev
+let apiBase = 'https://easydrop-account.judiancj.workers.dev';  // 账号 Worker 基地址（可用 ?apiBase= 覆盖，如本地 mock）
 let authToken = localStorage.getItem('easydrop_auth_token') || null;
 let currentUser = null;
 let syncPending = false;         // 正在同步时阻止本地写入覆盖云端
@@ -832,21 +857,63 @@ function clearAuthToken() {
 async function apiRequest(path, options = {}) {
   const headers = { 'content-type': 'application/json', ...options.headers };
   if (authToken) headers['authorization'] = 'Bearer ' + authToken;
-  const res = await fetch((apiBase || '') + path, { ...options, headers });
+  let res;
+  try {
+    res = await fetch((apiBase || '') + path, { ...options, headers });
+  } catch (e) {
+    showToast('无法连接账号服务，请检查网络或服务地址', 'error');
+    return null;
+  }
   if (res.status === 401) {
     // token 过期，清除并提示
     clearAuthToken();
     showToast('登录已过期，请重新登录', 'warning');
     return null;
   }
-  return res.json();
+  const data = await res.json().catch(() => null);
+  if (data === null) {
+    showToast('账号服务不可用（HTTP ' + res.status + '），请部署账号服务或通过 ?apiBase= 指定地址', 'error');
+    return null;
+  }
+  return data;
+}
+
+// 用户名：仅数字与小写字母，最多 8 位；密码：数字、大小写字母、符号中至少 2 类，最多 16 位
+const USERNAME_RE = /^[a-z0-9]{1,8}$/;
+const PASSWORD_RULES = [/\d/, /[a-z]/, /[A-Z]/, /[!-\/:-@\[-`{-~]/];
+const PASSWORD_MAX_LEN = 16;
+const PASSWORD_MIN_CLASSES = 2;
+function passwordClassCount(password) {
+  return PASSWORD_RULES.filter(rule => rule.test(password)).length;
+}
+function validateCredentials(username, password) {
+  if (!USERNAME_RE.test(username)) return '用户名只能包含数字和小写字母，且不超过 8 位';
+  if (password.length > PASSWORD_MAX_LEN || passwordClassCount(password) < PASSWORD_MIN_CLASSES) return '密码需至少包含数字、大写字母、小写字母、符号中的 2 类，且不超过 16 位';
+  return null;
+}
+// 强度：弱（不足 8 位或仅 2 类以下）/ 中（2 类或 12 位以下）/ 强（3 类以上且 12 位以上）
+function passwordStrength(password) {
+  if (!password) return { level: 0, label: '' };
+  const classes = passwordClassCount(password);
+  if (password.length < 8 || classes < PASSWORD_MIN_CLASSES) return { level: 1, label: '弱' };
+  if (classes === PASSWORD_MIN_CLASSES || password.length < 12) return { level: 2, label: '中' };
+  return { level: 3, label: '强' };
+}
+function updatePasswordStrength(password) {
+  const s = passwordStrength(password);
+  const fills = ['bg-red-400', 'bg-amber-400', 'bg-green-500'];
+  document.querySelectorAll('#authPwdStrength .pwd-bar').forEach((bar, i) => {
+    bar.className = 'pwd-bar h-1.5 flex-1 rounded-full transition-colors duration-300 ' + (i < s.level ? fills[s.level - 1] : 'bg-slate-200');
+  });
+  const label = document.getElementById('authPwdLevel');
+  if (label) label.textContent = s.label ? '密码强度：' + s.label : '';
 }
 
 // 注册
-async function signUp(email, password, name) {
+async function signUp(username, password, name) {
   const res = await apiRequest('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, name }),
+    body: JSON.stringify({ username, password, name }),
   });
   if (!res) return null;
   if (res.error) { showToast(res.error, 'error'); return null; }
@@ -860,10 +927,10 @@ async function signUp(email, password, name) {
 }
 
 // 登录
-async function signIn(email, password) {
+async function signIn(username, password) {
   const res = await apiRequest('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username, password }),
   });
   if (!res) return null;
   if (res.error) { showToast(res.error, 'error'); return null; }
@@ -3458,8 +3525,8 @@ function updateUserStatus() {
   if (!statusEl) return;
   if (currentUser) {
     statusEl.classList.remove('hidden');
-    nameEl.textContent = currentUser.name || currentUser.email;
-    avatarEl.textContent = (currentUser.name || currentUser.email || '?').charAt(0).toUpperCase();
+    nameEl.textContent = currentUser.name || currentUser.username;
+    avatarEl.textContent = (currentUser.name || currentUser.username || '?').charAt(0).toUpperCase();
     actionEl.textContent = '登出';
     actionEl.onclick = signOut;
   } else {
@@ -3510,8 +3577,9 @@ function toggleAuthModal() {
   const isHidden = modal.classList.contains('hidden');
   if (isHidden) {
     modal.classList.remove('hidden');
-    document.getElementById('authEmail').value = '';
+    document.getElementById('authUsername').value = '';
     document.getElementById('authPassword').value = '';
+    updatePasswordStrength('');
     document.getElementById('authName').value = '';
   } else {
     modal.classList.add('hidden');
@@ -3521,14 +3589,16 @@ function toggleAuthModal() {
 async function handleAuthSubmit(e) {
   e.preventDefault();
   const mode = document.getElementById('authMode').value; // 'login' | 'signup'
-  const email = document.getElementById('authEmail').value.trim();
+  const username = document.getElementById('authUsername').value.trim();
   const password = document.getElementById('authPassword').value;
   const name = document.getElementById('authName').value.trim();
-  if (!email || !password) { showToast('请填写邮箱与密码', 'error'); return; }
+  if (!username || !password) { showToast('请填写用户名与密码', 'error'); return; }
   if (mode === 'signup') {
-    await signUp(email, password, name || email.split('@')[0]);
+    const invalid = validateCredentials(username, password);
+    if (invalid) { showToast(invalid, 'error'); return; }
+    await signUp(username, password, name || username);
   } else {
-    await signIn(email, password);
+    await signIn(username, password);
   }
   if (currentUser) toggleAuthModal();
 }
@@ -3538,7 +3608,8 @@ function switchAuthMode() {
   const isLogin = mode === 'login';
   document.getElementById('authMode').value = isLogin ? 'signup' : 'login';
   document.getElementById('authTitle').textContent = isLogin ? '账号注册' : '账号登录';
-  document.getElementById('authNameField').classList.toggle('hidden', isLogin);
+  document.getElementById('authNameField').classList.toggle('hidden', !isLogin);
+  document.getElementById('authPwdHint').classList.toggle('hidden', !isLogin);
   document.getElementById('authSubmitBtn').textContent = isLogin ? '注册' : '登录';
   document.getElementById('authToggle').innerHTML = isLogin
     ? '已有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">直接登录</button>'
@@ -3646,7 +3717,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => {
       showToast('欢迎使用 EasyDrop', 'info');
     }, 500);
-  });
+  }
 
   // 登录/注册模态框提交
   const authForm = document.getElementById('authForm');
@@ -3662,34 +3733,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('authModal').classList.add('hidden');
     }
   });
-
-  if (!checkWebRTCSupport()) {
-    showToast('您的浏览器不支持 WebRTC，请使用 Chrome、Firefox 或 Edge 浏览器', 'error');
-  } else {
-    setTimeout(() => {
-      showToast('欢迎使用 EasyDrop', 'info');
-    }, 500);
-  }
 });
 
 </script>
 
 <!-- 登录/注册模态框 -->
-<div id="authModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+<div id="authModal" class="fixed inset-0 z-[60] hidden flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
   <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl animate-fade-in">
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
       <h3 class="text-xl font-bold text-slate-800" id="authTitle">账号登录</h3>
       <button onclick="toggleAuthModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
     </div>
     <form id="authForm" class="space-y-4">
       <input type="hidden" id="authMode" value="login">
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">邮箱</label>
-        <input id="authEmail" type="email" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="you@example.com">
+        <label class="block text-xs font-medium text-slate-600 mb-1">用户名</label>
+        <input id="authUsername" type="text" maxlength="8" autocomplete="username" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="数字或小写字母，最多 8 位">
       </div>
       <div>
         <label class="block text-xs font-medium text-slate-600 mb-1">密码</label>
-        <input id="authPassword" type="password" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="••••••••">
+        <input id="authPassword" type="password" maxlength="16" required autocomplete="current-password" oninput="updatePasswordStrength(this.value)" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="••••••••">
+        <div id="authPwdHint" class="hidden mt-2">
+          <div id="authPwdStrength" class="flex gap-1.5">
+            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
+            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
+            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
+          </div>
+          <div class="flex justify-between items-center text-xs mt-1.5">
+            <span id="authPwdLevel" class="text-slate-500 font-medium"></span>
+            <span class="text-slate-400">数字、大小写字母、符号至少 2 类，最多 16 位</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">安全建议：12 位以上，同时包含大小写字母、数字和符号，效果最佳</p>
+        </div>
       </div>
       <div id="authNameField" class="hidden">
         <label class="block text-xs font-medium text-slate-600 mb-1">昵称</label>

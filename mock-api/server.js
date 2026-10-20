@@ -16,7 +16,7 @@ app.use((req, res, next) => {
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'easydrop-dev-secret-change-me';
-const USERS = {};       // email -> user
+const USERS = {};       // username -> user
 const USERS_BY_ID = {}; // id -> user
 const FRIENDS = {};     // userId -> friend[]
 const HISTORY = {};     // userId -> entry[]
@@ -50,25 +50,31 @@ function auth(req) {
   return payload ? payload.sub : null;
 }
 
+const USERNAME_RE = /^[a-z0-9]{1,8}$/;
+const PASSWORD_RULES = [/\d/, /[a-z]/, /[A-Z]/, /[!-\/:-@\[-`{-~]/];
+const PASSWORD_MAX_LEN = 16;
+const PASSWORD_MIN_CLASSES = 2;
+
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, name } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: '缺少 email 或密码' });
-  const key = email.toLowerCase();
-  if (USERS[key]) return res.status(400).json({ error: '该邮箱已注册' });
+  const { username, password, name } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: '缺少用户名或密码' });
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ error: '用户名只能包含数字和小写字母，且不超过 8 位' });
+  if (password.length > PASSWORD_MAX_LEN || PASSWORD_RULES.filter(rule => rule.test(password)).length < PASSWORD_MIN_CLASSES) return res.status(400).json({ error: '密码需至少包含数字、大写字母、小写字母、符号中的 2 类，且不超过 16 位' });
+  if (USERS[username]) return res.status(400).json({ error: '该用户名已被注册' });
   const userId = 'u_' + crypto.randomUUID();
-  const user = { id: userId, email: key, name: name || key.split('@')[0], passwordHash: sha256Hex(password), createdAt: Date.now() };
-  USERS[key] = user; USERS_BY_ID[userId] = user;
-  const token = makeJwt({ sub: userId, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
-  res.json({ token, user: { id: userId, email: user.email, name: user.name } });
+  const user = { id: userId, username, name: name || username, passwordHash: sha256Hex(password), createdAt: Date.now() };
+  USERS[username] = user; USERS_BY_ID[userId] = user;
+  const token = makeJwt({ sub: userId, username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
+  res.json({ token, user: { id: userId, username, name: user.name } });
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: '缺少 email 或密码' });
-  const user = USERS[email.toLowerCase()];
-  if (!user || user.passwordHash !== sha256Hex(password)) return res.status(401).json({ error: '邮箱或密码错误' });
-  const token = makeJwt({ sub: user.id, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
-  res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: '缺少用户名或密码' });
+  const user = USERS[username];
+  if (!user || user.passwordHash !== sha256Hex(password)) return res.status(401).json({ error: '用户名或密码错误' });
+  const token = makeJwt({ sub: user.id, username: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
+  res.json({ token, user: { id: user.id, username: user.username, name: user.name } });
 });
 
 app.get('/api/auth/me', (req, res) => {
@@ -76,7 +82,7 @@ app.get('/api/auth/me', (req, res) => {
   if (!userId) return res.status(401).json({ error: '未登录或 token 已过期' });
   const user = USERS_BY_ID[userId];
   if (!user) return res.status(404).json({ error: '用户不存在' });
-  res.json({ user: { id: user.id, email: user.email, name: user.name } });
+  res.json({ user: { id: user.id, username: user.username, name: user.name } });
 });
 
 app.get('/api/friends', (req, res) => {
