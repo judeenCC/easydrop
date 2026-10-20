@@ -1,0 +1,11 @@
+name = "easydrop-account"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "EASYDROP_KV"
+id = "c19e48ba204a47538b3e60e26af921e2"
+
+[vars]
+JWT_SECRET = "easydrop-dev-secret-change-me"

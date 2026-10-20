@@ -1,0 +1,213 @@
+// EasyDrop 账号与云同步 Worker
+// 提供：注册/登录（JWT）、好友列表与传输记录的云端存储
+// 存储：KV 命名空间 EASYDROP_KV（需在 wrangler.toml / Cloudflare 控制台绑定）
+
+const ENC = new TextEncoder();
+const DEC = new TextDecoder();
+
+function json(data, status = 200, extra = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', ...extra },
+  });
+}
+
+function err(message, status = 400) {
+  return json({ error: message }, status);
+}
+
+async function getKV(env, key) {
+  const raw = await env.EASYDROP_KV.get(key);
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function setKV(env, key, value) {
+  await env.EASYDROP_KV.put(key, JSON.stringify(value));
+}
+
+async function sha256Hex(input) {
+  const buf = await crypto.subtle.digest('SHA-256', ENC.encode(input));
+  const arr = new Uint8Array(buf);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function makeJwt(payload, secret) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const b64url = (obj) => btoa(String.fromCharCode(...new Uint8Array(ENC.encode(JSON.stringify(obj)))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const signingInput = b64url(header) + '.' + b64url(payload);
+  const key = await crypto.subtle.importKey('raw', ENC.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, ENC.encode(signingInput));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return signingInput + '.' + sigB64;
+}
+
+async function verifyJwt(token, secret) {
+  try {
+    const [h, p, s] = token.split('.');
+    if (!h || !p || !s) return null;
+    const key = await crypto.subtle.importKey('raw', ENC.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const signingInput = h + '.' + p;
+    const sig = DEC.decode(await crypto.subtle.verify('HMAC', key, Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)), ENC.encode(signingInput)));
+    if (!sig) return null;
+    const payload = JSON.parse(DEC.decode(Uint8Array.from(atob(p.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))));
+    if (payload.exp && payload.exp * 1000 < Date.now()) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method;
+
+    // CORS preflight
+    if (method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'GET,POST,OPTIONS',
+          'access-control-allow-headers': 'content-type,authorization',
+        },
+      });
+    }
+
+    const secret = env.JWT_SECRET || 'easydrop-dev-secret-change-me';
+
+    // ==================== Auth ====================
+    if (path === '/api/auth/register' && method === 'POST') {
+      const { email, password, name } = await request.json().catch(() => ({}));
+      if (!email || !password) return err('缺少 email 或密码');
+      const emailKey = `user:email:${email.toLowerCase()}`;
+      if (await getKV(env, emailKey)) return err('该邮箱已注册');
+      const userId = 'u_' + crypto.randomUUID();
+      const user = {
+        id: userId,
+        email: email.toLowerCase(),
+        name: name || email.split('@')[0],
+        passwordHash: sha256Hex(password),
+        createdAt: Date.now(),
+      };
+      await setKV(env, emailKey, user);
+      await setKV(env, `user:id:${userId}`, user);
+      const token = makeJwt({ sub: userId, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: userId, email: user.email, name: user.name } });
+    }
+
+    if (path === '/api/auth/login' && method === 'POST') {
+      const { email, password } = await request.json().catch(() => ({}));
+      if (!email || !password) return err('缺少 email 或密码');
+      const user = await getKV(env, `user:email:${email.toLowerCase()}`);
+      if (!user || user.passwordHash !== sha256Hex(password)) return err('邮箱或密码错误', 401);
+      const token = makeJwt({ sub: user.id, email: user.email, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    }
+
+    if (path === '/api/auth/me' && method === 'GET') {
+      const token = (request.headers.get('authorization') || '').replace(/^Bearer\s/i, '');
+      const payload = await verifyJwt(token, secret);
+      if (!payload) return err('未登录或 token 已过期', 401);
+      const user = await getKV(env, `user:id:${payload.sub}`);
+      if (!user) return err('用户不存在', 404);
+      return json({ user: { id: user.id, email: user.email, name: user.name } });
+    }
+
+    // ==================== Auth 中间件 ====================
+    let authedUserId = null;
+    const authHeader = request.headers.get('authorization') || '';
+    const token = authHeader.replace(/^Bearer\s/i, '');
+    if (token) {
+      const payload = await verifyJwt(token, secret);
+      if (payload) authedUserId = payload.sub;
+    }
+
+    const requireAuth = () => {
+      if (!authedUserId) return err('未登录', 401);
+      return null;
+    };
+
+    // ==================== 好友列表 ====================
+    if (path === '/api/friends' && method === 'GET') {
+      const r = requireAuth();
+      if (r) return r;
+      const friends = await getKV(env, `user:${authedUserId}:friends`) || [];
+      return json({ friends });
+    }
+
+    if (path === '/api/friends' && method === 'POST') {
+      const r = requireAuth();
+      if (r) return r;
+      const { name, deviceId } = await request.json().catch(() => ({}));
+      if (!name || !deviceId) return err('缺少 name 或 deviceId');
+      const friends = await getKV(env, `user:${authedUserId}:friends`) || [];
+      if (friends.find(f => f.deviceId === deviceId)) return json({ friends });
+      const friend = { id: 'f_' + crypto.randomUUID(), name, deviceId, createdAt: Date.now(), transferCount: 0 };
+      friends.push(friend);
+      await setKV(env, `user:${authedUserId}:friends`, friends);
+      return json({ friends });
+    }
+
+    if (path.match(/^\/api\/friends\/([^/]+)$/) && method === 'DELETE') {
+      const r = requireAuth();
+      if (r) return r;
+      const friendId = path.match(/^\/api\/friends\/([^/]+)$/)[1];
+      const friends = await getKV(env, `user:${authedUserId}:friends`) || [];
+      const next = friends.filter(f => f.id !== friendId);
+      await setKV(env, `user:${authedUserId}:friends`, next);
+      return json({ friends: next });
+    }
+
+    // ==================== 传输记录 ====================
+    if (path === '/api/history' && method === 'GET') {
+      const r = requireAuth();
+      if (r) return r;
+      const history = await getKV(env, `user:${authedUserId}:history`) || [];
+      return json({ history });
+    }
+
+    if (path === '/api/history' && method === 'POST') {
+      const r = requireAuth();
+      if (r) return r;
+      const entry = await request.json().catch(() => ({}));
+      entry.t = entry.t || Date.now();
+      entry.id = 'h_' + crypto.randomUUID();
+      const history = await getKV(env, `user:${authedUserId}:history`) || [];
+      history.unshift(entry);
+      if (history.length > 100) history.length = 100;
+      await setKV(env, `user:${authedUserId}:history`, history);
+      return json({ history });
+    }
+
+    if (path === '/api/history/clear' && method === 'POST') {
+      const r = requireAuth();
+      if (r) return r;
+      await setKV(env, `user:${authedUserId}:history`, []);
+      return json({ ok: true });
+    }
+
+    // ==================== 设备信息（用于好友直连识别） ====================
+    if (path === '/api/device' && method === 'GET') {
+      const r = requireAuth();
+      if (r) return r;
+      const device = await getKV(env, `user:${authedUserId}:device`) || {};
+      return json({ device });
+    }
+
+    if (path === '/api/device' && method === 'POST') {
+      const r = requireAuth();
+      if (r) return r;
+      const device = await request.json().catch(() => ({}));
+      device.userId = authedUserId;
+      device.updatedAt = Date.now();
+      await setKV(env, `user:${authedUserId}:device`, device);
+      return json({ device });
+    }
+
+    return json({ error: 'Not Found' }, 404);
+  },
+};

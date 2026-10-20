@@ -293,6 +293,12 @@ tailwind.config = {
             <i class="fas fa-clock-rotate-left text-slate-500"></i>
             <span class="hidden sm:inline">传输记录</span>
           </button>
+
+          <span id="userStatus" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs">
+            <span class="w-6 h-6 rounded-full bg-primary-500 flex items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
+            <span class="text-slate-600 font-medium" id="userDisplayName">未登录</span>
+            <button onclick="toggleAuthModal()" class="ml-2 text-xs underline text-primary-500 hover:text-primary-600" id="userActionBtn">登录</button>
+          </span>
         </div>
       </div>
     </div>
@@ -802,6 +808,130 @@ let receivedChunks = [];
 let receivedBytes = 0;
 const textAssembly = {};         // 长文本分片重组缓冲
 
+// ==================== 账号与云同步 ====================
+let apiBase = '';                // 账号 Worker 基地址，部署后填写，如 https://easydrop-account.xxx.workers.dev
+let authToken = localStorage.getItem('easydrop_auth_token') || null;
+let currentUser = null;
+let syncPending = false;         // 正在同步时阻止本地写入覆盖云端
+
+const AUTH_TOKEN_KEY = 'easydrop_auth_token';
+const USER_KEY = 'easydrop_current_user';
+
+function setAuthToken(token) {
+  authToken = token;
+  try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch (e) { /* noop */ }
+}
+
+function clearAuthToken() {
+  authToken = null;
+  currentUser = null;
+  try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch (e) { /* noop */ }
+  try { localStorage.removeItem(USER_KEY); } catch (e) { /* noop */ }
+}
+
+async function apiRequest(path, options = {}) {
+  const headers = { 'content-type': 'application/json', ...options.headers };
+  if (authToken) headers['authorization'] = 'Bearer ' + authToken;
+  const res = await fetch((apiBase || '') + path, { ...options, headers });
+  if (res.status === 401) {
+    // token 过期，清除并提示
+    clearAuthToken();
+    showToast('登录已过期，请重新登录', 'warning');
+    return null;
+  }
+  return res.json();
+}
+
+// 注册
+async function signUp(email, password, name) {
+  const res = await apiRequest('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name }),
+  });
+  if (!res) return null;
+  if (res.error) { showToast(res.error, 'error'); return null; }
+  setAuthToken(res.token);
+  currentUser = res.user;
+  try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
+  showToast('注册成功，正在同步数据...', 'success');
+  await syncFromCloud();
+  updateUserStatus();
+  return currentUser;
+}
+
+// 登录
+async function signIn(email, password) {
+  const res = await apiRequest('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res) return null;
+  if (res.error) { showToast(res.error, 'error'); return null; }
+  setAuthToken(res.token);
+  currentUser = res.user;
+  try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
+  showToast('登录成功，正在同步数据...', 'success');
+  await syncFromCloud();
+  updateUserStatus();
+  return currentUser;
+}
+
+// 登出
+function signOut() {
+  clearAuthToken();
+  friends = [];
+  transferHistory = [];
+  renderFriendsList();
+  renderHistory();
+  updateUserStatus();
+  showToast('已登出', 'info');
+}
+
+// 从云端拉取好友与记录
+async function syncFromCloud() {
+  if (!authToken) return;
+  syncPending = true;
+  try {
+    const [fRes, hRes] = await Promise.all([
+      apiRequest('/api/friends'),
+      apiRequest('/api/history'),
+    ]);
+    if (fRes && !fRes.error && Array.isArray(fRes.friends)) {
+      friends = fRes.friends.map(f => ({ ...f, avatarColors: f.avatarColors || avatarColors[friends.findIndex(x => x.id === f.id) % avatarColors.length] || avatarColors[0] }));
+      saveFriends();
+      renderFriendsList();
+    }
+    if (hRes && !hRes.error && Array.isArray(hRes.history)) {
+      transferHistory = hRes.history;
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory)); } catch (e) { /* noop */ }
+      renderHistory();
+    }
+    showToast('云端数据已同步', 'success');
+  } catch (e) {
+    console.warn('同步失败，使用本地缓存', e);
+  } finally {
+    syncPending = false;
+  }
+}
+
+// 将本地好友推送到云端
+async function pushFriendsToCloud() {
+  if (!authToken || syncPending) return;
+  try {
+    for (const f of friends) {
+      await apiRequest('/api/friends', { method: 'POST', body: JSON.stringify({ name: f.name, deviceId: f.deviceId }) });
+    }
+  } catch (e) { console.warn('推送好友失败', e); }
+}
+
+// 将本地记录推送到云端
+async function pushHistoryToCloud() {
+  if (!authToken || syncPending) return;
+  for (const entry of transferHistory) {
+    await apiRequest('/api/history', { method: 'POST', body: JSON.stringify(entry) });
+  }
+}
+
 // ==================== Protocol Constants ====================
 const PEER_PREFIX_DEV = 'easydrop-dev-';     // 稳定设备 ID 前缀（好友直连用）
 const PEER_PREFIX_CODE = 'easydrop-code-';   // 6 位连接码会话 ID 前缀
@@ -900,7 +1030,18 @@ function getIceServers() {
 }
 
 // ==================== Friends Management ====================
-function loadFriends() {
+async function loadFriends() {
+  // 已登录且有云端数据时，优先从云端拉取；否则读本地缓存
+  if (authToken && currentUser) {
+    try {
+      const res = await apiRequest('/api/friends');
+      if (res && !res.error && Array.isArray(res.friends) && res.friends.length > 0) {
+        friends = res.friends.map(f => ({ ...f, avatarColors: f.avatarColors || avatarColors[0] }));
+        try { localStorage.setItem('easydrop_friends', JSON.stringify(friends)); } catch (e) { /* noop */ }
+        return;
+      }
+    } catch (e) { console.warn('云端好友加载失败，回退本地', e); }
+  }
   try {
     const stored = localStorage.getItem('easydrop_friends');
     friends = stored ? JSON.parse(stored) : [];
@@ -920,6 +1061,7 @@ function saveFriends() {
   } catch (e) {
     console.warn('Cannot save friends:', e);
   }
+  if (authToken && !syncPending) pushFriendsToCloud();
 }
 
 function addFriend(name, deviceId) {
@@ -1222,7 +1364,18 @@ const HISTORY_KEY = 'easydrop_history';
 const HISTORY_MAX = 100;
 let transferHistory = [];
 
-function loadHistory() {
+async function loadHistory() {
+  // 已登录时优先从云端拉取
+  if (authToken && currentUser) {
+    try {
+      const res = await apiRequest('/api/history');
+      if (res && !res.error && Array.isArray(res.history) && res.history.length > 0) {
+        transferHistory = res.history;
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory)); } catch (e) { /* noop */ }
+        return;
+      }
+    } catch (e) { console.warn('云端记录加载失败，回退本地', e); }
+  }
   try {
     const stored = localStorage.getItem(HISTORY_KEY);
     transferHistory = stored ? JSON.parse(stored) : [];
@@ -1245,6 +1398,7 @@ function addHistoryEntry(entry) {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory));
   } catch (e) { /* 存储失败不影响传输主流程 */ }
+  if (authToken && !syncPending) pushHistoryToCloud();
 }
 
 function currentPeerName() {
@@ -2606,7 +2760,6 @@ function renderFileQueue(force) {
           </div>
           <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
             <span>${formatFileSize(item.size)}${metaExtra ? ' · <span class="font-medium text-primary-500">' + metaExtra + '</span>' : ''}</span>
-            <span>${progress}%</span>
           </div>
           <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
             <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
@@ -2678,9 +2831,13 @@ async function sendFile(fileId) {
       frameCount++;
       transferStats.sent += buf.byteLength;
       item.sentBytes = offset;
-      item.progress = Math.floor((offset / file.size) * 100);
+      const newProgress = Math.floor((offset / file.size) * 100);
+      item.progress = newProgress;
       sampleProgress(item, offset);
-      renderFileQueue();
+      if (Math.abs(newProgress - item._lastRenderProgress || 0) >= 1 || offset >= file.size) {
+        item._lastRenderProgress = newProgress;
+        renderFileQueue();
+      }
     }
 
     sendControl({ type: 'file-end', id: item.id });
@@ -2827,14 +2984,17 @@ function handleFileChunk(payload) {
   if (!currentReceive) return;
   receivedChunks.push(payload);
   receivedBytes += payload.byteLength;
-  if (currentReceive.status === 'receiving') {
-    currentReceive.receivedBytes = receivedBytes;
-    if (currentReceive.size > 0) {
-      currentReceive.progress = Math.min(99, Math.floor((receivedBytes / currentReceive.size) * 100));
+    if (currentReceive.status === 'receiving') {
+      currentReceive.receivedBytes = receivedBytes;
+      if (currentReceive.size > 0) {
+        currentReceive.progress = Math.min(99, Math.floor((receivedBytes / currentReceive.size) * 100));
+      }
+      sampleProgress(currentReceive, receivedBytes);
+      if ((currentReceive.progress - currentReceive._lastRenderProgress || 0) >= 1 || currentReceive.progress >= 99) {
+        currentReceive._lastRenderProgress = currentReceive.progress;
+        renderReceivedFiles();
+      }
     }
-    sampleProgress(currentReceive, receivedBytes);
-    renderReceivedFiles();
-  }
 }
 
 function finishReceive(msg) {
@@ -2915,7 +3075,6 @@ function renderReceivedFiles(force) {
           </div>
           <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
             <span>${formatFileSize(item.size)}${metaExtra ? ' · <span class="font-medium text-accent-500">' + metaExtra + '</span>' : ''}</span>
-            <span>${progress}%</span>
           </div>
           <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
             <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
@@ -3291,6 +3450,27 @@ function updateHomeInfo() {
   }
 }
 
+function updateUserStatus() {
+  const statusEl = document.getElementById('userStatus');
+  const nameEl = document.getElementById('userDisplayName');
+  const avatarEl = document.getElementById('userAvatar');
+  const actionEl = document.getElementById('userActionBtn');
+  if (!statusEl) return;
+  if (currentUser) {
+    statusEl.classList.remove('hidden');
+    nameEl.textContent = currentUser.name || currentUser.email;
+    avatarEl.textContent = (currentUser.name || currentUser.email || '?').charAt(0).toUpperCase();
+    actionEl.textContent = '登出';
+    actionEl.onclick = signOut;
+  } else {
+    statusEl.classList.remove('hidden');
+    nameEl.textContent = '未登录';
+    avatarEl.textContent = '?';
+    actionEl.textContent = '登录';
+    actionEl.onclick = toggleAuthModal;
+  }
+}
+
 function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   const colors = {
@@ -3324,16 +3504,75 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
+function toggleAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (!modal) return;
+  const isHidden = modal.classList.contains('hidden');
+  if (isHidden) {
+    modal.classList.remove('hidden');
+    document.getElementById('authEmail').value = '';
+    document.getElementById('authPassword').value = '';
+    document.getElementById('authName').value = '';
+  } else {
+    modal.classList.add('hidden');
+  }
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const mode = document.getElementById('authMode').value; // 'login' | 'signup'
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const name = document.getElementById('authName').value.trim();
+  if (!email || !password) { showToast('请填写邮箱与密码', 'error'); return; }
+  if (mode === 'signup') {
+    await signUp(email, password, name || email.split('@')[0]);
+  } else {
+    await signIn(email, password);
+  }
+  if (currentUser) toggleAuthModal();
+}
+
+function switchAuthMode() {
+  const mode = document.getElementById('authMode').value;
+  const isLogin = mode === 'login';
+  document.getElementById('authMode').value = isLogin ? 'signup' : 'login';
+  document.getElementById('authTitle').textContent = isLogin ? '账号注册' : '账号登录';
+  document.getElementById('authNameField').classList.toggle('hidden', isLogin);
+  document.getElementById('authSubmitBtn').textContent = isLogin ? '注册' : '登录';
+  document.getElementById('authToggle').innerHTML = isLogin
+    ? '已有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">直接登录</button>'
+    : '没有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">立即注册</button>';
+}
+
 // ==================== Initialize ====================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   ensureIdentity();
+  // 读取 URL 参数 ?apiBase= 以指向账号云同步后端（本地 mock 或部署后的 Worker）
+  try {
+    const params = new URLSearchParams(location.search);
+    const p = params.get('apiBase');
+    if (p) apiBase = p;
+  } catch (e) { /* noop */ }
+  // 恢复登录状态
+  if (authToken) {
+    try {
+      const me = await apiRequest('/api/auth/me');
+      if (me && !me.error && me.user) {
+        currentUser = me.user;
+        try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
+      } else {
+        clearAuthToken();
+      }
+    } catch (e) { clearAuthToken(); }
+  }
   loadFriends();
   renderFriendsList();
   setupFileInput();
   loadSettingsUI();
   const fy = document.getElementById('footerYear');
   if (fy) fy.textContent = String(new Date().getFullYear());
-  loadHistory();
+  await loadHistory();
   // 功能视图常驻主页内容区，分段标签切换显示；默认落在好友列表
   const tabContent = document.getElementById('tabContent');
   ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode'].forEach(id => {
@@ -3342,6 +3581,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   switchTab('friends');
   updateHomeInfo();
+  updateUserStatus();
   window.addEventListener('online', updateHomeInfo);
   window.addEventListener('offline', updateHomeInfo);
   const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -3406,9 +3646,64 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       showToast('欢迎使用 EasyDrop', 'info');
     }, 500);
+  });
+
+  // 登录/注册模态框提交
+  const authForm = document.getElementById('authForm');
+  if (authForm) authForm.addEventListener('submit', handleAuthSubmit);
+  document.getElementById('authModal').addEventListener('click', (e) => {
+    if (e.target.id === 'authModal') toggleAuthModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.getElementById('settingsModal').classList.add('hidden');
+      closeFriendModal();
+      goHome();
+      document.getElementById('authModal').classList.add('hidden');
+    }
+  });
+
+  if (!checkWebRTCSupport()) {
+    showToast('您的浏览器不支持 WebRTC，请使用 Chrome、Firefox 或 Edge 浏览器', 'error');
+  } else {
+    setTimeout(() => {
+      showToast('欢迎使用 EasyDrop', 'info');
+    }, 500);
   }
 });
 
 </script>
+
+<!-- 登录/注册模态框 -->
+<div id="authModal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl animate-fade-in">
+    <div class="flex items-center justify-between mb-6">
+      <h3 class="text-xl font-bold text-slate-800" id="authTitle">账号登录</h3>
+      <button onclick="toggleAuthModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
+    </div>
+    <form id="authForm" class="space-y-4">
+      <input type="hidden" id="authMode" value="login">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">邮箱</label>
+        <input id="authEmail" type="email" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="you@example.com">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">密码</label>
+        <input id="authPassword" type="password" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="••••••••">
+      </div>
+      <div id="authNameField" class="hidden">
+        <label class="block text-xs font-medium text-slate-600 mb-1">昵称</label>
+        <input id="authName" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="易传">
+      </div>
+      <p class="text-xs text-slate-400 text-center" id="authToggle">
+        没有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">立即注册</button>
+      </p>
+      <button type="submit" id="authSubmitBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium">登录</button>
+    </form>
+    <p class="text-xs text-slate-400 text-center mt-4">
+      登录后，好友列表与传输记录将云端同步，换设备打开网页也能找回。
+    </p>
+  </div>
+</div>
 </body>
 </html>
