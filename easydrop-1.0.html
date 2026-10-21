@@ -270,6 +270,14 @@ tailwind.config = {
     overflow-y: auto;
   }
 
+  /* 头部、主内容、底部共用同一条对齐线，宽屏下不会左右散开 */
+  .app-container {
+    width: 100%;
+    max-width: 72rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .pulse-ring, .status-dot::after, .progress-bar, .animate-fade-in, .animate-slide-up, .toast {
       animation: none !important;
@@ -292,7 +300,7 @@ tailwind.config = {
 
   <!-- Header -->
   <header class="glass-strong border-b border-slate-200/50 sticky top-0 z-50">
-    <div class="px-4 sm:px-6 lg:px-8">
+    <div class="app-container px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-14 sm:h-16 gap-2 min-w-0">
         <div class="flex items-center gap-2 sm:gap-3 min-w-0">
           <div class="relative w-9 h-9 sm:w-10 sm:h-10 flex-shrink-0 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
@@ -330,7 +338,7 @@ tailwind.config = {
   </header>
 
   <!-- Main Content -->
-  <main class="flex-1 flex flex-col w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
+  <main class="app-container flex-1 flex flex-col px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
 
     <!-- ==================== 主页（分段式标签页） ==================== -->
     <div id="homeSection" class="animate-fade-in flex flex-col">
@@ -749,7 +757,7 @@ tailwind.config = {
 
   <!-- Footer -->
   <footer class="glass-strong border-t border-slate-200/50 mt-auto">
-    <div class="px-4 sm:px-6 lg:px-8 py-6">
+    <div class="app-container px-4 sm:px-6 lg:px-8 py-6">
       <div class="flex flex-col md:flex-row items-center justify-between gap-4">
         <p class="text-slate-400 text-sm">© <span id="footerYear">2026</span> EasyDrop · 基于 WebRTC 技术</p>
         <div class="flex items-center gap-6 text-sm text-slate-400">
