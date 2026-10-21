@@ -538,15 +538,10 @@ tailwind.config = {
               <h3 class="text-xl font-semibold mb-2 text-slate-700">还没有好友</h3>
               <p class="text-slate-400 text-sm">建立第一次连接后，可以把对方一键添加为好友；对方在线时支持一键直连</p>
             </div>
-            <div class="flex items-center gap-4 flex-shrink-0">
-              <button onclick="switchTab('send')" class="px-6 py-3 rounded-xl btn-primary text-white font-medium whitespace-nowrap">
-                <i class="fas fa-plus mr-2"></i>
-                创建新连接
-              </button>
-              <div class="w-12 h-12 rounded-2xl empty-state-icon flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-user-plus text-xl text-primary-500"></i>
-              </div>
-            </div>
+            <button onclick="switchTab('send')" class="px-6 py-3 rounded-xl btn-primary text-white font-medium whitespace-nowrap flex-shrink-0">
+              <i class="fas fa-plus mr-2"></i>
+              创建新连接
+            </button>
           </div>
         </div>
         </div>
@@ -1073,9 +1068,10 @@ async function signUp(username, password, name) {
   setAuthToken(res.token);
   currentUser = res.user;
   try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
-  showToast('注册成功，正在同步数据...', 'success');
-  await syncFromCloud();
+  showToast('注册成功', 'success');
   updateUserStatus();
+  // 好友与记录的云端同步放后台执行，不阻塞关闭弹窗
+  syncFromCloud();
   return currentUser;
 }
 
@@ -1090,9 +1086,10 @@ async function signIn(username, password) {
   setAuthToken(res.token);
   currentUser = res.user;
   try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
-  showToast('登录成功，正在同步数据...', 'success');
-  await syncFromCloud();
+  showToast('登录成功', 'success');
   updateUserStatus();
+  // 好友与记录的云端同步放后台执行，不阻塞关闭弹窗
+  syncFromCloud();
   return currentUser;
 }
 
@@ -4042,12 +4039,29 @@ function toggleAuthModal() {
   const isHidden = modal.classList.contains('hidden');
   if (isHidden) {
     modal.classList.remove('hidden');
+    // 每次打开都回到登录模式，避免上次停在注册页
+    setAuthMode('login');
     document.getElementById('authUsername').value = '';
     document.getElementById('authPassword').value = '';
     updatePasswordStrength('');
     document.getElementById('authName').value = '';
   } else {
     modal.classList.add('hidden');
+  }
+}
+
+// 提交期间按钮进入加载态，让用户明确感知请求在进行
+function setAuthLoading(loading) {
+  const btn = document.getElementById('authSubmitBtn');
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.classList.toggle('opacity-80', loading);
+  btn.classList.toggle('cursor-not-allowed', loading);
+  if (loading) {
+    btn.dataset.label = btn.textContent;
+    btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin align-[-3px] mr-2"></span>请稍候...';
+  } else {
+    btn.textContent = btn.dataset.label || (document.getElementById('authMode').value === 'signup' ? '注册' : '登录');
   }
 }
 
@@ -4061,24 +4075,34 @@ async function handleAuthSubmit(e) {
   if (mode === 'signup') {
     const invalid = validateCredentials(username, password);
     if (invalid) { showToast(invalid, 'error'); return; }
-    await signUp(username, password, name || username);
-  } else {
-    await signIn(username, password);
+  }
+  setAuthLoading(true);
+  try {
+    if (mode === 'signup') {
+      await signUp(username, password, name || username);
+    } else {
+      await signIn(username, password);
+    }
+  } finally {
+    setAuthLoading(false);
   }
   if (currentUser) toggleAuthModal();
 }
 
-function switchAuthMode() {
-  const mode = document.getElementById('authMode').value;
-  const isLogin = mode === 'login';
-  document.getElementById('authMode').value = isLogin ? 'signup' : 'login';
-  document.getElementById('authTitle').textContent = isLogin ? '账号注册' : '账号登录';
-  document.getElementById('authNameField').classList.toggle('hidden', !isLogin);
-  document.getElementById('authPwdHint').classList.toggle('hidden', !isLogin);
-  document.getElementById('authSubmitBtn').textContent = isLogin ? '注册' : '登录';
-  document.getElementById('authToggle').innerHTML = isLogin
+function setAuthMode(mode) {
+  const isSignup = mode === 'signup';
+  document.getElementById('authMode').value = mode;
+  document.getElementById('authTitle').textContent = isSignup ? '账号注册' : '账号登录';
+  document.getElementById('authNameField').classList.toggle('hidden', !isSignup);
+  document.getElementById('authPwdHint').classList.toggle('hidden', !isSignup);
+  document.getElementById('authSubmitBtn').textContent = isSignup ? '注册' : '登录';
+  document.getElementById('authToggle').innerHTML = isSignup
     ? '已有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">直接登录</button>'
     : '没有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">立即注册</button>';
+}
+
+function switchAuthMode() {
+  setAuthMode(document.getElementById('authMode').value === 'login' ? 'signup' : 'login');
 }
 
 // ==================== Initialize ====================
