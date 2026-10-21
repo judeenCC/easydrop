@@ -2230,9 +2230,6 @@ function activateMode(tab) {
     const mode = document.getElementById(t + 'Mode');
     if (mode) mode.classList.toggle('hidden', t !== tab);
   });
-  // 功能页只显示功能内容，首页才展示底部的功能介绍卡片，避免页面过长需要滚动
-  const features = document.getElementById('featuresSection');
-  if (features) features.classList.toggle('hidden', tab !== 'home');
 }
 
 function goHome() {
