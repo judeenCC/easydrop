@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EasyDrop - 跨网络文件传输</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath fill='white' d='M18.2 3.5 8.4 17.2h6.2L13 28.5l10.6-14.2h-6.3L18.2 3.5z'/%3E%3C/svg%3E">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
@@ -19,13 +20,97 @@ tailwind.config = {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace']
+      },
+      fontSize: {
+        xs: ['0.75rem', { lineHeight: '1.6' }],
+        sm: ['0.875rem', { lineHeight: '1.6' }]
       }
     }
   }
 }
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<!-- Font Awesome Free 6.4.0 — https://fontawesome.com License: https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT). 内嵌子集，避免 CDN / 广告拦截导致图标空白。 -->
+<style id="fa-icons">
+@font-face {
+  font-family: "Font Awesome 6 Free";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url("data:font/woff2;base64,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") format("woff2");
+}
+.fas, .fa-solid {
+  font-family: "Font Awesome 6 Free" !important;
+  font-weight: 900 !important;
+  font-style: normal;
+  font-variant: normal;
+  line-height: 1;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  display: inline-block;
+}
+.fas::before, .fa-solid::before {
+  font-family: "Font Awesome 6 Free" !important;
+  font-weight: 900 !important;
+}
+.fa-arrow-down:before { content: "\f063"; }
+.fa-arrow-up:before { content: "\f062"; }
+.fa-bolt:before { content: "\f0e7"; }
+.fa-check:before { content: "\f00c"; }
+.fa-circle:before { content: "\f111"; }
+.fa-circle-check:before { content: "\f058"; }
+.fa-circle-info:before { content: "\f05a"; }
+.fa-circle-notch:before { content: "\f1ce"; }
+.fa-circle-xmark:before { content: "\f057"; }
+.fa-clipboard:before { content: "\f328"; }
+.fa-clock:before { content: "\f017"; }
+.fa-clock-rotate-left:before { content: "\f1da"; }
+.fa-cloud-arrow-up:before { content: "\f0ee"; }
+.fa-cog:before { content: "\f013"; }
+.fa-copy:before { content: "\f0c5"; }
+.fa-download:before { content: "\f019"; }
+.fa-exchange-alt:before { content: "\f362"; }
+.fa-exclamation-triangle:before { content: "\f071"; }
+.fa-file:before { content: "\f15b"; }
+.fa-file-excel:before { content: "\f1c3"; }
+.fa-file-lines:before { content: "\f15c"; }
+.fa-file-pdf:before { content: "\f1c1"; }
+.fa-file-powerpoint:before { content: "\f1c4"; }
+.fa-file-word:before { content: "\f1c2"; }
+.fa-file-zipper:before { content: "\f1c6"; }
+.fa-film:before { content: "\f008"; }
+.fa-font:before { content: "\f031"; }
+.fa-gear:before { content: "\f013"; }
+.fa-globe:before { content: "\f0ac"; }
+.fa-hourglass-half:before { content: "\f252"; }
+.fa-image:before { content: "\f03e"; }
+.fa-link:before { content: "\f0c1"; }
+.fa-mobile-screen:before { content: "\f3cf"; }
+.fa-music:before { content: "\f001"; }
+.fa-network-wired:before { content: "\f6ff"; }
+.fa-palette:before { content: "\f53f"; }
+.fa-paper-plane:before { content: "\f1d8"; }
+.fa-paste:before { content: "\f0ea"; }
+.fa-pen:before { content: "\f304"; }
+.fa-plug:before { content: "\f1e6"; }
+.fa-plus:before { content: "\2b"; }
+.fa-rotate-right:before { content: "\f2f9"; }
+.fa-share-nodes:before { content: "\f1e0"; }
+.fa-shield-halved:before { content: "\f3ed"; }
+.fa-tower-broadcast:before { content: "\f519"; }
+.fa-trash:before { content: "\f1f8"; }
+.fa-triangle-exclamation:before { content: "\f071"; }
+.fa-user-plus:before { content: "\f234"; }
+.fa-users:before { content: "\f0c0"; }
+.fa-xmark:before { content: "\f00d"; }
+@keyframes fa-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.fa-spin { animation: fa-spin 2s linear infinite; }
+</style>
+
 <style>
   * { -webkit-font-smoothing: antialiased; box-sizing: border-box; }
   body {
@@ -681,7 +766,7 @@ tailwind.config = {
     </div>
 
     <!-- Features Section：mt-auto 沉底，贴近页脚；pt-6 保证内容溢出滚动时与上方内容仍有最小间距 -->
-    <div id="featuresSection" class="mt-10 sm:mt-14 w-full max-w-[1680px] mx-auto flex flex-col md:flex-row md:justify-between gap-4 sm:gap-6">
+    <div id="featuresSection" class="mt-auto pt-10 sm:pt-14 w-full max-w-[1680px] mx-auto flex flex-col md:flex-row md:justify-between gap-4 sm:gap-6">
       <div class="glass rounded-2xl p-6 md:w-[calc(33.333%-1rem)] xl:w-[446px] flex-shrink-0">
         <div class="flex items-start gap-5">
           <div class="w-14 h-14 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
@@ -4068,7 +4153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       </p>
       <button type="submit" id="authSubmitBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium">登录</button>
     </form>
-    <p class="text-xs text-slate-400 text-center mt-4">
+    <p class="text-xs text-slate-400 text-center mt-5 leading-relaxed">
       登录后，好友列表与传输记录将云端同步，换设备打开网页也能找回。
     </p>
   </div>
