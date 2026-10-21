@@ -255,7 +255,7 @@ tailwind.config = {
   /* ==== 布局基础：统一内容宽度，避免切换视图时左右跳动 ==== */
   .page-panel {
     width: 100%;
-    max-width: 48rem;
+    max-width: 56rem;
     margin-left: auto;
     margin-right: auto;
   }
@@ -272,6 +272,12 @@ tailwind.config = {
 
   /* 头部、主内容、底部共用同一条对齐线，宽屏下不会左右散开 */
   .app-container {
+    width: 100%;
+    max-width: 80rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .page-wide {
     width: 100%;
     max-width: 72rem;
     margin-left: auto;
@@ -344,7 +350,7 @@ tailwind.config = {
     <div id="homeSection" class="animate-fade-in flex flex-col">
 
       <!-- Hero Section -->
-      <div id="heroSection" class="text-center mb-6 sm:mb-8">
+      <div id="heroSection" class="text-center mb-5 sm:mb-6">
         <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold mb-3 sm:mb-4 gradient-text leading-tight">
           随时随地，极速传输
         </h2>
@@ -354,7 +360,7 @@ tailwind.config = {
       </div>
 
       <!-- 分段式标签栏：四等分，宽度固定居中 -->
-      <div class="mb-6 sm:mb-8">
+      <div class="mb-5 sm:mb-6">
         <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-4 gap-1 w-full max-w-xl mx-auto">
           <button onclick="onTabClick('friends')" data-tab="friends" class="seg-tab">好友列表</button>
           <button onclick="onTabClick('send')" data-tab="send" class="seg-tab">我要发送</button>
@@ -371,8 +377,8 @@ tailwind.config = {
 
     <!-- Friends Mode -->
     <div id="friendsMode" class="hidden animate-fade-in">
-      <div class="page-panel">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div class="page-wide">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">我的好友</h3>
             <p class="text-sm text-slate-400">点击好友直接发起传输，无需重复输入连接码</p>
@@ -383,13 +389,15 @@ tailwind.config = {
           </button>
         </div>
 
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-6 items-start">
+        <div class="min-w-0">
         <!-- 我的身份：唯一识别码 + 设备地址 + 统一输入（识别码或连接地址） -->
-        <div id="uidCard" class="glass-strong rounded-2xl panel-card mb-6">
-          <div id="uidLoggedOut" class="hidden text-center mb-6 pb-6 border-b border-slate-200/70">
+        <div id="uidCard" class="glass-strong rounded-2xl p-5 sm:p-6">
+          <div id="uidLoggedOut" class="hidden text-center mb-4 pb-4 border-b border-slate-200/70">
             <p class="text-sm text-slate-500 mb-3">登录账号后将获得唯一识别码，对方可凭识别码添加你为好友或向你发送文件</p>
             <button onclick="toggleAuthModal()" class="px-5 py-2.5 rounded-xl btn-primary text-white text-sm font-medium">登录 / 注册</button>
           </div>
-          <div id="uidLoggedIn" class="hidden mb-6 pb-6 border-b border-slate-200/70">
+          <div id="uidLoggedIn" class="hidden mb-4 pb-4 border-b border-slate-200/70">
             <div class="flex items-center justify-between gap-3 mb-4">
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-slate-700">我的唯一识别码</p>
@@ -402,7 +410,7 @@ tailwind.config = {
             <p id="myUidText" class="code-display text-2xl sm:text-3xl font-bold gradient-text tracking-widest pl-[0.1em] text-center select-all">--------</p>
           </div>
 
-          <div class="flex items-center gap-4 mb-6 pb-6 border-b border-slate-200/70">
+          <div class="flex items-center gap-4 mb-4 pb-4 border-b border-slate-200/70">
             <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
               <i class="fas fa-network-wired text-primary-500 text-xl"></i>
             </div>
@@ -433,11 +441,13 @@ tailwind.config = {
           </div>
         </div>
 
+        </div>
+        <div class="min-w-0">
         <div id="friendsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- Friends will be rendered here -->
         </div>
 
-        <div id="friendsEmptyState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center hidden">
+        <div id="friendsEmptyState" class="glass-strong rounded-3xl p-6 sm:p-8 text-center hidden">
           <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
             <i class="fas fa-user-plus text-3xl text-primary-500"></i>
           </div>
@@ -447,6 +457,8 @@ tailwind.config = {
             <i class="fas fa-plus mr-2"></i>
             创建新连接
           </button>
+        </div>
+        </div>
         </div>
 
       </div>
@@ -501,11 +513,19 @@ tailwind.config = {
                 等待接收方输入连接码，对方输入后将自动建立连接
               </div>
             </div>
+            <div class="text-center">
+              <button onclick="cancelShareCode()" class="px-5 py-2.5 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-sm text-slate-600 transition-all">
+                <i class="fas fa-xmark mr-1"></i>取消连接码
+              </button>
+            </div>
           </div>
 
           <div id="connectingState" class="hidden text-center py-8">
             <div class="inline-block w-12 h-12 border-4 border-primary-500/20 border-t-primary-500 rounded-full animate-spin mb-4"></div>
             <p class="text-slate-500" id="connectingText">正在建立点对点连接...</p>
+            <button onclick="cancelDial()" class="mt-5 px-5 py-2.5 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-sm text-slate-600 transition-all">
+              <i class="fas fa-xmark mr-1"></i>取消连接
+            </button>
           </div>
         </div>
       </div>
@@ -620,6 +640,9 @@ tailwind.config = {
       <div id="receiveConnecting" class="hidden text-center py-8">
         <div class="inline-block w-12 h-12 border-4 border-accent-500/20 border-t-accent-500 rounded-full animate-spin mb-4"></div>
         <p class="text-slate-500" id="receiveConnectingText">正在连接发送方...</p>
+        <button onclick="cancelDial()" class="mt-5 px-5 py-2.5 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-sm text-slate-600 transition-all">
+          <i class="fas fa-xmark mr-1"></i>取消连接
+        </button>
       </div>
 
       <div id="receiveInterface" class="hidden page-panel">
@@ -722,6 +745,8 @@ tailwind.config = {
           <p class="text-slate-400 text-sm mt-1">选择设备即直连，拖入文件立即发送</p>
           <p id="localsendNetStatus" class="text-xs text-slate-400 mt-2">局域网发现：启动中...</p>
         </div>
+
+        <div id="localsendSession" class="hidden mb-6"></div>
 
         <div id="localsendDeviceList" class="space-y-3"></div>
 
@@ -854,6 +879,11 @@ let remoteIdentity = null;
 let dialingFriend = null;
 let dialingCode = false;
 let dialTimeout = null;
+let dialActive = false;          // 是否有进行中的拨号（随时可取消）
+let dialSeq = 0;                 // 拨号序号：取消或重新拨号后，旧的异步流程自动作废
+let pendingDialConn = null;      // 进行中的拨号连接，取消时关闭
+let dialFrom = null;             // 拨号来源：'localsend' 时结果留在 LocalSend 页面
+let localsendDialTarget = null;  // LocalSend 中正在拨号的设备 ID（用于行内转圈）
 
 // 传输状态（同一时间只允许一个文件在传，避免数据交叉损坏）
 let currentTransfer = null;      // 正在发送的文件项
@@ -1475,7 +1505,7 @@ function closeFriendModal() {
 }
 
 // 一键直连好友：直接拨对方稳定的设备 ID，无需再交换 6 位码
-async function connectToFriend(friendId) {
+async function connectToFriend(friendId, from = null) {
   const friend = friends.find(f => f.id === friendId);
   if (!friend) return;
 
@@ -1494,15 +1524,22 @@ async function connectToFriend(friendId) {
     return;
   }
 
-  // peer 未就绪时先等待，避免 offer 被丢弃
+  // 先进入可取消的拨号状态，再等待信令服务就绪（等待期间也能取消）
+  const seq = ++dialSeq;
+  dialActive = true;
+  dialFrom = from;
+  if (from === 'localsend') { localsendDialTarget = friend.deviceId; renderLocalsendList(); }
   if (!peer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
+    if (seq !== dialSeq) return;
     if (!ok) {
+      endDial();
       showToast('连接服务未就绪，请稍后重试', 'error');
       return;
     }
     if (connected || dataChannel) {
+      endDial();
       showToast('已有活动连接，请先断开后再发起新连接', 'warning');
       return;
     }
@@ -1510,18 +1547,21 @@ async function connectToFriend(friendId) {
 
   isInitiator = true;
   dialingFriend = friend;
-  switchTab('send');
-  hide('sendSetup');
-  hide('shareCodeStep');
-  hide('sendInterface');
-  show('connectingState');
-  const t = document.getElementById('connectingText');
-  if (t) t.textContent = `正在连接 ${friend.name}...`;
+  if (from !== 'localsend') {
+    switchTab('send');
+    hide('sendSetup');
+    hide('shareCodeStep');
+    hide('sendInterface');
+    show('connectingState');
+    const t = document.getElementById('connectingText');
+    if (t) t.textContent = `正在连接 ${friend.name}...`;
+  }
 
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial(`连接 ${friend.name} 超时，对方可能不在线`), 20000);
 
   const conn = peer.connect(PEER_PREFIX_DEV + friend.deviceId, { reliable: true });
+  pendingDialConn = conn;
   conn.on('open', () => {
     if (dialingFriend !== friend) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingFriend = null;
@@ -1740,7 +1780,7 @@ function connectByInput() {
   if (kind === 'address') return dialByAddress('connect', 'peerUidInput');
   identityInputHint(kind);
 }
-function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput'); }
+function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput', 'localsend'); }
 
 // ==================== LocalSend 速传 + 局域网发现 ====================
 // 浏览器无 UDP 组播，借公共 MQTT-over-WebSocket 做信标总线：同一网段
@@ -1950,6 +1990,7 @@ function renderLocalsendList() {
   const rows = [];
   const seen = new Set();
   lanPeersLive().forEach(p => {
+    if (p.id === myDeviceId) return;   // 本机不出现在设备列表里
     seen.add(p.id);
     const f = friends.find(fr => fr.deviceId === p.id);
     rows.push({ deviceId: p.id, friendId: f ? f.id : null, name: f ? f.name : p.name, lan: true, isFriend: !!f });
@@ -1976,13 +2017,16 @@ function renderLocalsendList() {
         ? '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网 · 好友</span>'
         : '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网发现</span>')
       : '<span class="px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-500 text-xs flex-shrink-0">好友</span>';
-    const subtext = row.lan
-      ? (row.isFriend ? '局域网在线 · 点击一键直连' : '局域网在线 · 点击发起连接（对方需确认）')
-      : '点击直连 · 对方在线时立即建立';
+    const busy = localsendDialTarget === row.deviceId;
+    const subtext = busy
+      ? '正在连接，等待对方确认 · 再次点击可取消'
+      : (row.lan
+        ? (row.isFriend ? '局域网在线 · 点击一键直连' : '局域网在线 · 点击发起连接（对方需确认）')
+        : '点击直连 · 对方在线时立即建立');
 
     const el = document.createElement('div');
     el.className = 'friend-card glass rounded-2xl p-4 cursor-pointer';
-    el.onclick = () => row.friendId ? connectToFriend(row.friendId) : dialDevice(row.deviceId);
+    el.onclick = () => onLocalsendRowClick(row);
     el.innerHTML = `
       <div class="flex items-center gap-4">
         <div class="relative flex-shrink-0">
@@ -1998,8 +2042,8 @@ function renderLocalsendList() {
           </div>
           <p class="text-xs text-slate-400 mt-0.5">${subtext}</p>
         </div>
-        <div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
-          <i class="fas fa-paper-plane text-primary-500 text-sm"></i>
+        <div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0" title="${busy ? '再次点击取消连接' : '发起连接'}">
+          <i class="fas ${busy ? 'fa-circle-notch fa-spin' : 'fa-paper-plane'} text-primary-500 text-sm"></i>
         </div>
       </div>`;
     list.appendChild(el);
@@ -2012,7 +2056,7 @@ function openLocalSend() {
   switchTab('localsend');
 }
 
-async function dialByAddress(purpose, inputId) {
+async function dialByAddress(purpose, inputId, from = null) {
   const input = document.getElementById(inputId || 'peerUidInput');
   const targetId = parseDeviceAddress(input ? input.value : '');
   if (!targetId) {
@@ -2026,15 +2070,15 @@ async function dialByAddress(purpose, inputId) {
   const existing = friends.find(f => f.deviceId === targetId);
   if (existing) {
     showToast(existing.name + ' 已是好友，直接为你发起直连', 'info');
-    connectToFriend(existing.id);
+    connectToFriend(existing.id, from);
     return;
   }
   dialPurpose = purpose;
-  await dialDevice(targetId);
+  await dialDevice(targetId, from);
 }
 
 // 按稳定设备 ID 拨号；对方是陌生设备时会先弹确认，同意才真正握手
-async function dialDevice(deviceId) {
+async function dialDevice(deviceId, from = null) {
   if (connected || dataChannel || pendingIncomingConn) {
     showToast('已有连接在处理，请先断开或完成后再发起', 'warning');
     return;
@@ -2043,14 +2087,21 @@ async function dialDevice(deviceId) {
     showToast('信令连接未就绪，请稍后重试', 'error');
     return;
   }
+  const seq = ++dialSeq;
+  dialActive = true;
+  dialFrom = from;
+  if (from === 'localsend') { localsendDialTarget = deviceId; renderLocalsendList(); }
   if (!peer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
+    if (seq !== dialSeq) return;
     if (!ok) {
+      endDial();
       showToast('连接服务未就绪，请稍后重试', 'error');
       return;
     }
     if (connected || dataChannel) {
+      endDial();
       showToast('已有活动连接，请先断开', 'warning');
       return;
     }
@@ -2058,13 +2109,17 @@ async function dialDevice(deviceId) {
 
   isInitiator = true;
   dialingFriend = { name: '对方设备', deviceId: deviceId }; // 复用拨号超时与错误处理
-  switchTab('send');
-  hide('sendSetup');
-  hide('shareCodeStep');
-  hide('sendInterface');
-  show('connectingState');
-  const t = document.getElementById('connectingText');
-  if (t) t.textContent = '正在请求连接对方设备，等待对方确认...';
+  if (from !== 'localsend') {
+    switchTab('send');
+    hide('sendSetup');
+    hide('shareCodeStep');
+    hide('sendInterface');
+    show('connectingState');
+    const t = document.getElementById('connectingText');
+    if (t) t.textContent = '正在请求连接对方设备，等待对方确认...';
+  } else {
+    showToast('已发送连接请求，等待对方确认；再次点击转圈图标可取消', 'info');
+  }
 
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial('对方未响应（可能不在线或拒绝了请求）'), 25000);
@@ -2074,6 +2129,7 @@ async function dialDevice(deviceId) {
     reliable: true,
     metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
   });
+  pendingDialConn = conn;
   conn.on('open', () => {
     if (!dialingFriend || dialingFriend.deviceId !== deviceId) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingFriend = null;
@@ -2152,9 +2208,9 @@ function onTabClick(tab) {
     showToast('请先断开连接后再切换', 'warning');
     return;
   }
-  if (tab !== currentTab && (dialingFriend || dialingCode)) {
-    showToast('正在建立连接，请稍候', 'info');
-    return;
+  // 拨号中切换标签：自动取消当前拨号，不再把用户锁在等待页面
+  if (tab !== currentTab && (dialActive || dialingFriend || dialingCode)) {
+    cancelDial();
   }
   if (tab === 'localsend') renderLocalsendList();
   switchTab(tab);
@@ -2174,6 +2230,9 @@ function activateMode(tab) {
     const mode = document.getElementById(t + 'Mode');
     if (mode) mode.classList.toggle('hidden', t !== tab);
   });
+  // 功能页只显示功能内容，首页才展示底部的功能介绍卡片，避免页面过长需要滚动
+  const features = document.getElementById('featuresSection');
+  if (features) features.classList.toggle('hidden', tab !== 'home');
 }
 
 function goHome() {
@@ -2181,10 +2240,7 @@ function goHome() {
     showToast('请先断开连接后再返回主页', 'warning');
     return;
   }
-  if (dialingFriend || dialingCode) {
-    showToast('正在建立连接，请稍候', 'info');
-    return;
-  }
+  if (dialActive || dialingFriend || dialingCode) cancelDial();
   switchTab('home');
 }
 
@@ -2379,6 +2435,14 @@ function handlePeerError(err, kind, p) {
 }
 
 // ==================== Sender: Create Connection ====================
+// 发送方取消等待中的连接码：销毁连接码 peer、停止倒计时，回到生成前的界面
+function cancelShareCode() {
+  if (connected || dataChannel) return;
+  resetConnection();
+  switchTab('send');
+  showToast('已取消连接码', 'info');
+}
+
 function generateOffer() {
   if (connected || dataChannel || pendingIncomingConn) {
     showToast('已有连接在处理，请先完成或断开', 'warning');
@@ -2458,16 +2522,21 @@ async function generateAnswer() {
     return;
   }
 
-  // peer 未就绪时先等待，避免 offer 被丢弃
+  // 先进入可取消的拨号状态，再等待信令服务就绪
+  const seq = ++dialSeq;
+  dialActive = true;
   if (!peer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
+    if (seq !== dialSeq) return;
     if (!ok) {
+      endDial();
       showToast('连接服务未就绪，请稍后重试', 'error');
       return;
     }
     // 等待期间状态可能已变化，重新校验
     if (connected || dataChannel) {
+      endDial();
       showToast('已有活动连接，请先断开', 'warning');
       return;
     }
@@ -2486,6 +2555,7 @@ async function generateAnswer() {
   dialTimeout = setTimeout(() => failCodeDial('连接超时，请确认连接码是否正确'), 25000);
 
   const conn = peer.connect(PEER_PREFIX_CODE + inputCode, { reliable: true });
+  pendingDialConn = conn;
   conn.on('open', () => {
     if (!dialingCode) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingCode = false;
@@ -2508,6 +2578,7 @@ function clearDialTimeout() {
 function failCodeDial(msg) {
   if (!dialingCode) return;
   dialingCode = false;
+  endDial();
   clearDialTimeout();
   isInitiator = false;
   hide('receiveConnecting');
@@ -2517,18 +2588,88 @@ function failCodeDial(msg) {
 
 function failFriendDial(msg) {
   if (!dialingFriend) return;
+  const fromLocal = dialFrom === 'localsend';
   dialingFriend = null;
+  endDial();
   clearDialTimeout();
   isInitiator = false;
+  if (!fromLocal) {
+    hide('connectingState');
+    hide('sendInterface');
+    show('sendSetup');
+    show('generateCodeStep');
+  }
+  showToast(msg, 'error');
+}
+
+// 清理拨号状态（不关闭连接）；LocalSend 行内转圈随之复位
+function endDial() {
+  const wasLocal = dialFrom === 'localsend' || !!localsendDialTarget;
+  dialActive = false;
+  pendingDialConn = null;
+  dialFrom = null;
+  localsendDialTarget = null;
+  if (wasLocal) renderLocalsendList();
+}
+
+// 取消进行中的拨号：关闭待定连接，回到拨号前的界面（随时可用，包括等待对方确认时）
+function cancelDial() {
+  if (!dialActive && !dialingFriend && !dialingCode) return;
+  const conn = pendingDialConn;
+  dialSeq++;
+  dialingFriend = null;
+  dialingCode = false;
+  clearDialTimeout();
+  endDial();
+  isInitiator = false;
+  try { if (conn) conn.close(); } catch (e) { /* noop */ }
   hide('connectingState');
-  hide('sendInterface');
   show('sendSetup');
   show('generateCodeStep');
-  showToast(msg, 'error');
+  hide('receiveConnecting');
+  show('receiveSetup');
+  showToast('已取消连接', 'info');
+}
+
+// 连接建立后，把发送区域放进 LocalSend 页面；断开后归还给"我要发送"页
+function placeSendInterfaceInLocalsend() {
+  const si = document.getElementById('sendInterface');
+  const session = document.getElementById('localsendSession');
+  if (!si || !session) return;
+  session.appendChild(si);
+  show('sendInterface');
+  show('localsendSession');
+}
+
+function restoreSendInterface() {
+  const si = document.getElementById('sendInterface');
+  const sm = document.getElementById('sendMode');
+  if (si && sm && si.parentElement !== sm) sm.appendChild(si);
+  hide('localsendSession');
+}
+
+// LocalSend 设备行：空闲时发起连接；连接中再次点击即取消
+function onLocalsendRowClick(row) {
+  if (localsendDialTarget === row.deviceId) { cancelDial(); return; }
+  if (dialActive || dialingFriend || dialingCode) {
+    showToast('正在连接其他设备，请先取消当前连接', 'warning');
+    return;
+  }
+  if (connected || dataChannel) {
+    showToast('已有连接，请先在下方断开后再连接其他设备', 'warning');
+    return;
+  }
+  if (row.friendId) connectToFriend(row.friendId, 'localsend');
+  else dialDevice(row.deviceId, 'localsend');
 }
 
 // ==================== Setup Data Channel ====================
 function setupConnection(conn) {
+  const viaLocalsend = isInitiator && dialFrom === 'localsend';
+  dialActive = false;
+  pendingDialConn = null;
+  dialFrom = null;
+  localsendDialTarget = null;
   dataChannel = conn;
   connected = true;
   remoteIdentity = null;
@@ -2539,17 +2680,23 @@ function setupConnection(conn) {
     if (!dataChannel || dataChannel !== conn) return;
     updateConnectionStatus(true);
 
-    // 连接建立：切到对应角色的标签页
-    switchTab(isInitiator ? 'send' : 'receive');
-
-    if (isInitiator) {
-      hide('sendSetup');
-      hide('connectingState');
-      show('sendInterface');
+    if (viaLocalsend) {
+      // LocalSend 来源：留在 LocalSend 页面，发送区域直接放在这里
+      placeSendInterfaceInLocalsend();
+      renderLocalsendList();
     } else {
-      hide('receiveSetup');
-      hide('receiveConnecting');
-      show('receiveInterface');
+      // 连接建立：切到对应角色的标签页
+      switchTab(isInitiator ? 'send' : 'receive');
+
+      if (isInitiator) {
+        hide('sendSetup');
+        hide('connectingState');
+        show('sendInterface');
+      } else {
+        hide('receiveSetup');
+        hide('receiveConnecting');
+        show('receiveInterface');
+      }
     }
 
     showToast('连接已建立', 'success');
@@ -3389,7 +3536,10 @@ function resetConnection() {
   dialPurpose = 'connect';
 
   updateConnectionStatus(false);
+  endDial();
 
+  const wasLocalSession = !document.getElementById('localsendSession').classList.contains('hidden');
+  restoreSendInterface();
   show('sendSetup');
   show('generateCodeStep');
   hide('shareCodeStep');
@@ -3399,7 +3549,8 @@ function resetConnection() {
   hide('receiveConnecting');
   hide('receiveInterface');
   show('waitingState');
-  switchTab('home');
+  if (wasLocalSession) renderLocalsendList();
+  else switchTab('home');
 
   const codeDisplay = document.getElementById('codeDisplay');
   if (codeDisplay) codeDisplay.textContent = '------';
