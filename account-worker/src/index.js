@@ -63,6 +63,21 @@ async function verifyJwt(token, secret) {
   }
 }
 
+const UID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function genUid() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, b => UID_ALPHABET[b % UID_ALPHABET.length]).join('');
+}
+
+async function allocUid(env) {
+  for (let i = 0; i < 10; i++) {
+    const uid = genUid();
+    if (!(await getKV(env, `uid:${uid}`))) return uid;
+  }
+  throw new Error('识别码分配失败');
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -92,26 +107,29 @@ export default {
       const usernameKey = `user:username:${username}`;
       if (await getKV(env, usernameKey)) return err('该用户名已被注册');
       const userId = 'u_' + crypto.randomUUID();
+      const uid = await allocUid(env);
       const user = {
         id: userId,
+        uid,
         username,
         name: name || username,
-        passwordHash: sha256Hex(password),
+        passwordHash: await sha256Hex(password),
         createdAt: Date.now(),
       };
       await setKV(env, usernameKey, user);
       await setKV(env, `user:id:${userId}`, user);
-      const token = makeJwt({ sub: userId, username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
-      return json({ token, user: { id: userId, username, name: user.name } });
+      await setKV(env, `uid:${uid}`, userId);
+      const token = await makeJwt({ sub: userId, username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: userId, uid, username, name: user.name } });
     }
 
     if (path === '/api/auth/login' && method === 'POST') {
       const { username, password } = await request.json().catch(() => ({}));
       if (!username || !password) return err('缺少用户名或密码');
       const user = await getKV(env, `user:username:${username}`);
-      if (!user || user.passwordHash !== sha256Hex(password)) return err('用户名或密码错误', 401);
-      const token = makeJwt({ sub: user.id, username: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
-      return json({ token, user: { id: user.id, username: user.username, name: user.name } });
+      if (!user || user.passwordHash !== (await sha256Hex(password))) return err('用户名或密码错误', 401);
+      const token = await makeJwt({ sub: user.id, username: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, secret);
+      return json({ token, user: { id: user.id, uid: user.uid, username: user.username, name: user.name } });
     }
 
     if (path === '/api/auth/me' && method === 'GET') {
@@ -120,7 +138,7 @@ export default {
       if (!payload) return err('未登录或 token 已过期', 401);
       const user = await getKV(env, `user:id:${payload.sub}`);
       if (!user) return err('用户不存在', 404);
-      return json({ user: { id: user.id, username: user.username, name: user.name } });
+      return json({ user: { id: user.id, uid: user.uid, username: user.username, name: user.name } });
     }
 
     // ==================== Auth 中间件 ====================
@@ -194,6 +212,20 @@ export default {
       if (r) return r;
       await setKV(env, `user:${authedUserId}:history`, []);
       return json({ ok: true });
+    }
+
+    // ==================== 识别码查询（添加好友 / 发送文件） ====================
+    if (path === '/api/users/lookup' && method === 'GET') {
+      const r = requireAuth();
+      if (r) return r;
+      const uid = (url.searchParams.get('uid') || '').trim().toUpperCase();
+      if (!/^[A-HJ-NP-Z2-9]{8}$/.test(uid)) return err('识别码为 8 位字母或数字');
+      const targetId = await getKV(env, `uid:${uid}`);
+      if (!targetId) return err('未找到该识别码对应的用户', 404);
+      const target = await getKV(env, `user:id:${targetId}`);
+      const device = await getKV(env, `user:${targetId}:device`);
+      if (!device || !device.deviceId) return err('对方尚未登录过设备，暂时无法连接', 404);
+      return json({ uid, name: target.name, deviceId: device.deviceId, self: targetId === authedUserId });
     }
 
     // ==================== 设备信息（用于好友直连识别） ====================

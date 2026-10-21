@@ -18,6 +18,16 @@ app.use((req, res, next) => {
 const JWT_SECRET = process.env.JWT_SECRET || 'easydrop-dev-secret-change-me';
 const USERS = {};       // username -> user
 const USERS_BY_ID = {}; // id -> user
+const USERS_BY_UID = {}; // 识别码 -> userId
+
+const UID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function allocUid() {
+  for (;;) {
+    let uid = '';
+    for (let i = 0; i < 8; i++) uid += UID_ALPHABET[crypto.randomInt(UID_ALPHABET.length)];
+    if (!USERS_BY_UID[uid]) return uid;
+  }
+}
 const FRIENDS = {};     // userId -> friend[]
 const HISTORY = {};     // userId -> entry[]
 
@@ -62,10 +72,11 @@ app.post('/api/auth/register', (req, res) => {
   if (password.length > PASSWORD_MAX_LEN || PASSWORD_RULES.filter(rule => rule.test(password)).length < PASSWORD_MIN_CLASSES) return res.status(400).json({ error: '密码需至少包含数字、大写字母、小写字母、符号中的 2 类，且不超过 16 位' });
   if (USERS[username]) return res.status(400).json({ error: '该用户名已被注册' });
   const userId = 'u_' + crypto.randomUUID();
-  const user = { id: userId, username, name: name || username, passwordHash: sha256Hex(password), createdAt: Date.now() };
-  USERS[username] = user; USERS_BY_ID[userId] = user;
+  const uid = allocUid();
+  const user = { id: userId, uid, username, name: name || username, passwordHash: sha256Hex(password), createdAt: Date.now() };
+  USERS[username] = user; USERS_BY_ID[userId] = user; USERS_BY_UID[uid] = userId;
   const token = makeJwt({ sub: userId, username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
-  res.json({ token, user: { id: userId, username, name: user.name } });
+  res.json({ token, user: { id: userId, uid, username, name: user.name } });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -74,7 +85,7 @@ app.post('/api/auth/login', (req, res) => {
   const user = USERS[username];
   if (!user || user.passwordHash !== sha256Hex(password)) return res.status(401).json({ error: '用户名或密码错误' });
   const token = makeJwt({ sub: user.id, username: user.username, exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
-  res.json({ token, user: { id: user.id, username: user.username, name: user.name } });
+  res.json({ token, user: { id: user.id, uid: user.uid, username: user.username, name: user.name } });
 });
 
 app.get('/api/auth/me', (req, res) => {
@@ -82,7 +93,7 @@ app.get('/api/auth/me', (req, res) => {
   if (!userId) return res.status(401).json({ error: '未登录或 token 已过期' });
   const user = USERS_BY_ID[userId];
   if (!user) return res.status(404).json({ error: '用户不存在' });
-  res.json({ user: { id: user.id, username: user.username, name: user.name } });
+  res.json({ user: { id: user.id, uid: user.uid, username: user.username, name: user.name } });
 });
 
 app.get('/api/friends', (req, res) => {
@@ -134,6 +145,18 @@ app.post('/api/history/clear', (req, res) => {
   if (!userId) return res.status(401).json({ error: '未登录' });
   HISTORY[userId] = [];
   res.json({ ok: true });
+});
+
+app.get('/api/users/lookup', (req, res) => {
+  const userId = auth(req);
+  if (!userId) return res.status(401).json({ error: '未登录' });
+  const uid = String(req.query.uid || '').trim().toUpperCase();
+  if (!/^[A-HJ-NP-Z2-9]{8}$/.test(uid)) return res.status(400).json({ error: '识别码为 8 位字母或数字' });
+  const targetId = USERS_BY_UID[uid];
+  if (!targetId) return res.status(404).json({ error: '未找到该识别码对应的用户' });
+  const device = DEVICES[targetId];
+  if (!device || !device.deviceId) return res.status(404).json({ error: '对方尚未登录过设备，暂时无法连接' });
+  res.json({ uid, name: USERS_BY_ID[targetId].name, deviceId: device.deviceId, self: targetId === userId });
 });
 
 app.get('/api/device', (req, res) => {

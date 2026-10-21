@@ -293,36 +293,36 @@ tailwind.config = {
   <!-- Header -->
   <header class="glass-strong border-b border-slate-200/50 sticky top-0 z-50">
     <div class="px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <div class="flex items-center gap-3">
-          <div class="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
-            <i class="fas fa-bolt text-white text-lg"></i>
+      <div class="flex items-center justify-between h-14 sm:h-16 gap-2 min-w-0">
+        <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div class="relative w-9 h-9 sm:w-10 sm:h-10 flex-shrink-0 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
+            <i class="fas fa-bolt text-white text-base sm:text-lg"></i>
           </div>
-          <div>
-            <h1 class="text-lg font-bold tracking-tight text-slate-800">EasyDrop</h1>
-            <p class="text-xs text-slate-400">跨网络文件传输</p>
+          <div class="min-w-0">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-800 leading-tight">EasyDrop</h1>
+            <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
           </div>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2 sm:gap-4 flex-shrink-0">
           <div id="connectionStatus" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs">
             <span class="status-dot bg-red-400 text-red-400"></span>
             <span class="text-slate-500">未连接</span>
           </div>
 
-          <button onclick="toggleSettings()" class="w-10 h-10 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all">
+          <button onclick="toggleSettings()" class="w-10 h-10 flex-shrink-0 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all" title="设置">
             <i class="fas fa-cog text-slate-500"></i>
           </button>
 
-          <button onclick="openHistory()" class="h-10 px-4 rounded-xl glass hover:bg-slate-100 flex items-center justify-center gap-2 transition-all text-sm text-slate-600" title="查看传输记录">
+          <button onclick="openHistory()" class="h-10 w-10 sm:w-auto sm:px-4 flex-shrink-0 rounded-xl glass hover:bg-slate-100 flex items-center justify-center gap-2 transition-all text-sm text-slate-600" title="查看传输记录">
             <i class="fas fa-clock-rotate-left text-slate-500"></i>
             <span class="hidden sm:inline">传输记录</span>
           </button>
 
-          <span id="userStatus" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs">
-            <span class="w-6 h-6 rounded-full bg-primary-500 flex items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
-            <span class="text-slate-600 font-medium" id="userDisplayName">未登录</span>
-            <button onclick="toggleAuthModal()" class="ml-2 text-xs underline text-primary-500 hover:text-primary-600" id="userActionBtn">登录</button>
+          <span id="userStatus" class="flex items-center gap-2 pl-1.5 pr-2 sm:px-3 h-10 sm:h-auto sm:py-1.5 rounded-full glass text-xs flex-shrink-0">
+            <span class="hidden sm:flex w-6 h-6 rounded-full bg-primary-500 items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
+            <span class="hidden sm:inline text-slate-600 font-medium max-w-[7rem] truncate" id="userDisplayName">未登录</span>
+            <button onclick="toggleAuthModal()" class="sm:ml-2 px-1 text-xs underline whitespace-nowrap text-primary-500 hover:text-primary-600" id="userActionBtn">登录</button>
           </span>
         </div>
       </div>
@@ -375,6 +375,56 @@ tailwind.config = {
           </button>
         </div>
 
+        <!-- 我的身份：唯一识别码 + 设备地址 + 统一输入（识别码或连接地址） -->
+        <div id="uidCard" class="glass-strong rounded-2xl panel-card mb-6">
+          <div id="uidLoggedOut" class="hidden text-center mb-6 pb-6 border-b border-slate-200/70">
+            <p class="text-sm text-slate-500 mb-3">登录账号后将获得唯一识别码，对方可凭识别码添加你为好友或向你发送文件</p>
+            <button onclick="toggleAuthModal()" class="px-5 py-2.5 rounded-xl btn-primary text-white text-sm font-medium">登录 / 注册</button>
+          </div>
+          <div id="uidLoggedIn" class="hidden mb-6 pb-6 border-b border-slate-200/70">
+            <div class="flex items-center justify-between gap-3 mb-4">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-slate-700">我的唯一识别码</p>
+                <p class="text-xs text-slate-400">账号专属，对方输入即可添加你为好友或向你发送文件</p>
+              </div>
+              <button onclick="copyMyUid()" class="px-4 py-2 rounded-xl glass hover:bg-slate-100 text-sm text-slate-600 flex-shrink-0">
+                <i class="fas fa-copy mr-1"></i>复制
+              </button>
+            </div>
+            <p id="myUidText" class="code-display text-2xl sm:text-3xl font-bold gradient-text tracking-widest pl-[0.1em] text-center select-all">--------</p>
+          </div>
+
+          <div class="flex items-center gap-4 mb-6 pb-6 border-b border-slate-200/70">
+            <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+              <i class="fas fa-network-wired text-primary-500 text-xl"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-700 mb-1">我的设备IP（连接地址）</p>
+              <p id="myDeviceAddress" class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
+              <p id="myLanIp" class="js-lan-ip text-xs text-slate-400 mt-1">本机IP：检测中...</p>
+            </div>
+            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
+              <i class="fas fa-copy text-primary-500"></i>
+            </button>
+          </div>
+
+          <div>
+            <label class="text-sm text-slate-500 mb-2 block">输入对方的唯一识别码，或粘贴对方的连接地址</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input type="text" id="peerUidInput" autocomplete="off" placeholder="8 位识别码，或 https://…/?connect=xxxxxxxx" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+              <div class="flex gap-2">
+                <button onclick="addFriendByInput()" class="flex-1 sm:flex-none px-5 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 text-sm font-medium whitespace-nowrap">
+                  <i class="fas fa-user-plus mr-1"></i>添加好友
+                </button>
+                <button onclick="connectByInput()" class="flex-1 sm:flex-none px-5 py-3 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap">
+                  <i class="fas fa-paper-plane mr-1"></i>连接发送
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">对方会收到确认弹窗，同意后建立连接或添加为好友；同一局域网、跨网络均可</p>
+          </div>
+        </div>
+
         <div id="friendsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- Friends will be rendered here -->
         </div>
@@ -391,35 +441,6 @@ tailwind.config = {
           </button>
         </div>
 
-        <!-- 我的设备IP / 地址互连：复制地址给对方，或粘贴对方地址发起连接/加好友 -->
-        <div id="ipShareCard" class="glass rounded-2xl p-5 mt-6">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
-              <i class="fas fa-network-wired text-primary-500 text-xl"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-700 mb-1">我的设备IP（连接地址）</p>
-              <p id="myDeviceAddress" class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
-              <p id="myLanIp" class="js-lan-ip text-xs text-slate-400 mt-1">本机IP：检测中...</p>
-            </div>
-            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
-              <i class="fas fa-copy text-primary-500"></i>
-            </button>
-          </div>
-          <div class="mt-5 pt-5 border-t border-slate-200/70">
-            <label class="text-sm text-slate-500 mb-2 block">粘贴对方的连接地址，向对方发起请求</label>
-            <div class="flex flex-col sm:flex-row gap-2">
-              <input type="text" id="remoteAddressInput" placeholder="例如：https://…/?connect=xxxxxxxx" class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
-              <button onclick="connectByAddress()" class="px-5 py-3 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap">
-                <i class="fas fa-plug mr-1"></i>连接
-              </button>
-              <button onclick="addFriendByAddress()" class="px-5 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 text-sm font-medium whitespace-nowrap">
-                <i class="fas fa-user-plus mr-1"></i>添加好友
-              </button>
-            </div>
-            <p class="text-xs text-slate-400 mt-2">对方会收到确认弹窗，同意后建立连接或添加为好友；同一局域网、跨网络均可</p>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -1184,6 +1205,87 @@ function renameFriend(friendId, newName) {
   }
 }
 
+// ==================== 唯一识别码（添加好友 / 发送文件） ====================
+function renderUidCard() {
+  const loggedIn = !!(authToken && currentUser);
+  const on = document.getElementById('uidLoggedIn');
+  const off = document.getElementById('uidLoggedOut');
+  if (!on || !off) return;
+  on.classList.toggle('hidden', !loggedIn);
+  off.classList.toggle('hidden', loggedIn);
+  const text = document.getElementById('myUidText');
+  if (text) text.textContent = loggedIn && currentUser.uid ? currentUser.uid : '--------';
+}
+
+// 把本机设备 ID 发布到账号下，识别码由此解析到当前设备
+async function publishDevice() {
+  if (!authToken || !currentUser) return;
+  try {
+    await apiRequest('/api/device', { method: 'POST', body: JSON.stringify({ deviceId: myDeviceId, name: myDeviceName }) });
+  } catch (e) { console.warn('设备信息发布失败', e); }
+}
+
+function copyMyUid() {
+  if (!currentUser || !currentUser.uid) return;
+  navigator.clipboard.writeText(currentUser.uid).then(() => {
+    showToast('识别码已复制', 'success');
+  }).catch(() => showToast('复制失败', 'error'));
+}
+
+async function lookupUid(raw) {
+  if (!authToken || !currentUser) {
+    showToast('请先登录账号，再使用识别码', 'warning');
+    toggleAuthModal();
+    return null;
+  }
+  const code = (raw || '').trim().toUpperCase();
+  if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) {
+    showToast('请输入 8 位识别码（字母或数字）', 'warning');
+    return null;
+  }
+  if (code === currentUser.uid) {
+    showToast('这是你自己的识别码', 'warning');
+    return null;
+  }
+  const res = await apiRequest('/api/users/lookup?uid=' + code);
+  if (!res) return null;
+  if (res.error) {
+    showToast(res.error, 'error');
+    return null;
+  }
+  if (res.deviceId === myDeviceId) {
+    showToast('这是本设备的识别码', 'warning');
+    return null;
+  }
+  return res;
+}
+
+async function addFriendByUid() {
+  const input = document.getElementById('peerUidInput');
+  const info = await lookupUid(input && input.value);
+  if (!info) return;
+  if (friends.some(f => f.deviceId === info.deviceId)) {
+    showToast(info.name + ' 已是好友', 'info');
+    return;
+  }
+  addFriend(info.name, info.deviceId);
+  showToast('已添加好友：' + info.name, 'success');
+  if (input) input.value = '';
+}
+
+async function sendFileByUid() {
+  const input = document.getElementById('peerUidInput');
+  const info = await lookupUid(input && input.value);
+  if (!info) return;
+  const friend = friends.find(f => f.deviceId === info.deviceId);
+  if (friend) {
+    connectToFriend(friend.id);
+    return;
+  }
+  dialPurpose = 'connect';
+  await dialDevice(info.deviceId);
+}
+
 function renderFriendsList() {
   const container = document.getElementById('friendsList');
   const emptyState = document.getElementById('friendsEmptyState');
@@ -1602,8 +1704,34 @@ async function updateLanIpDisplay() {
   els.forEach(el => { el.textContent = text; });
 }
 
-function connectByAddress() { dialByAddress('connect'); }
-function addFriendByAddress() { dialByAddress('add-friend'); }
+// 统一输入：8 位识别码走账号流程，连接地址走设备直连流程
+function identityInputKind() {
+  const input = document.getElementById('peerUidInput');
+  const raw = input ? input.value.trim() : '';
+  if (!raw) return 'empty';
+  if (/^[A-HJ-NP-Z2-9]{8}$/i.test(raw)) return 'uid';
+  if (parseDeviceAddress(raw)) return 'address';
+  return 'invalid';
+}
+
+function identityInputHint(kind) {
+  if (kind === 'empty') showToast('请输入对方的唯一识别码或连接地址', 'warning');
+  else showToast('无法识别：请输入 8 位识别码，或对方的连接地址', 'warning');
+}
+
+function addFriendByInput() {
+  const kind = identityInputKind();
+  if (kind === 'uid') return addFriendByUid();
+  if (kind === 'address') return dialByAddress('add-friend', 'peerUidInput');
+  identityInputHint(kind);
+}
+
+function connectByInput() {
+  const kind = identityInputKind();
+  if (kind === 'uid') return sendFileByUid();
+  if (kind === 'address') return dialByAddress('connect', 'peerUidInput');
+  identityInputHint(kind);
+}
 function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput'); }
 
 // ==================== LocalSend 速传 + 局域网发现 ====================
@@ -1877,7 +2005,7 @@ function openLocalSend() {
 }
 
 async function dialByAddress(purpose, inputId) {
-  const input = document.getElementById(inputId || 'remoteAddressInput');
+  const input = document.getElementById(inputId || 'peerUidInput');
   const targetId = parseDeviceAddress(input ? input.value : '');
   if (!targetId) {
     showToast('请粘贴对方的连接地址（对方"我的设备IP"卡片中可复制）', 'warning');
@@ -3488,6 +3616,7 @@ function saveSettings() {
     try { localStorage.setItem('easydrop_stun', stun); } catch (e) { /* noop */ }
   }
   updateHomeInfo();
+  publishDevice();
   showToast('设置已保存，连接相关设置将在下次建立连接时生效', 'success');
   toggleSettings();
 }
@@ -3536,6 +3665,8 @@ function updateUserStatus() {
     actionEl.textContent = '登录';
     actionEl.onclick = toggleAuthModal;
   }
+  renderUidCard();
+  if (currentUser) publishDevice();
 }
 
 function showToast(message, type = 'info') {
