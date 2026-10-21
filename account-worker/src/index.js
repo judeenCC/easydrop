@@ -47,15 +47,23 @@ async function makeJwt(payload, secret) {
   return signingInput + '.' + sigB64;
 }
 
+// base64url → bytes；makeJwt 去掉了 padding，解码前必须补回，否则 atob 抛错
+function b64urlBytes(str) {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+}
+
 async function verifyJwt(token, secret) {
   try {
     const [h, p, s] = token.split('.');
     if (!h || !p || !s) return null;
     const key = await crypto.subtle.importKey('raw', ENC.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
     const signingInput = h + '.' + p;
-    const sig = DEC.decode(await crypto.subtle.verify('HMAC', key, Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)), ENC.encode(signingInput)));
-    if (!sig) return null;
-    const payload = JSON.parse(DEC.decode(Uint8Array.from(atob(p.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))));
+    // 注意：crypto.subtle.verify 返回 boolean，不是 ArrayBuffer
+    const valid = await crypto.subtle.verify('HMAC', key, b64urlBytes(s), ENC.encode(signingInput));
+    if (!valid) return null;
+    const payload = JSON.parse(DEC.decode(b64urlBytes(p)));
     if (payload.exp && payload.exp * 1000 < Date.now()) return null;
     return payload;
   } catch (e) {

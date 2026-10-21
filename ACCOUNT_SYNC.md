@@ -1,14 +1,18 @@
 # EasyDrop 账号云同步 — 部署与使用说明
 
-## 为什么“无法登录”
+## 生产架构（当前已生效）
 
-前端 `apiBase` 默认为空字符串，且账号云同步后端（Cloudflare Worker）尚未部署，因此浏览器请求 `POST /api/auth/login` 会得到 404，登录/注册均失败。
+- 前端 `apiBase` 默认为空字符串（同源）。浏览器请求 `/api/*` 由 Pages 高级模式 `_worker.js` 反向代理到账号 Worker `https://easydrop-account.judiancj.workers.dev`。
+- 这样客户端只需能访问 `https://easydrop-ady.pages.dev`，无需直连 `*.workers.dev`（后者在部分网络下不可达）。
+- Pages `_worker.js` 源码在 `pages-deploy/_worker.js`，构建时复制到 `.deploy-cloudflare/_worker.js`；改动它之后需要重新触发 Pages 部署（推送 `main` 即可）。
 
-## 解决方案
+## 本地开发：用 mock 服务器验证
 
-### 方案一：本地用 mock 服务器验证（推荐先测试）
+本地静态服务器（如 `python -m http.server 8080`）不含 `/api/*` 路由，需先启动 mock：
 
-后台已启动 mock 服务器：`http://localhost:3456`（进程 id `bgp_1586b0873001BXG0c0Wz3Q3gst`）。
+```bash
+node mock-api/server.js   # 监听 http://localhost:3456
+```
 
 在浏览器中打开页面并带上查询参数：
 
@@ -47,7 +51,7 @@ file:///D:/Back_up/Dev/easy_dorp/easydrop-1.0.html?apiBase=http://localhost:3456
    wrangler deploy
    ```
 
-4. 得到 Worker URL（如 `https://easydrop-account.<子域>.workers.dev`），在前端 `easydrop-1.0.html` 中将 `apiBase` 设为该地址（或让用户通过 `?apiBase=` 传入）。
+4. 得到 Worker URL（如 `https://easydrop-account.<子域>.workers.dev`），把它填进 `pages-deploy/_worker.js` 顶部的 `ACCOUNT_ORIGIN`；前端默认同源请求即可，无需再改 `apiBase`（调试用 `?apiBase=` 仍可覆盖）。
 
 ## 接口一致性
 

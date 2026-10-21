@@ -901,6 +901,7 @@ tailwind.config = {
       <div>
         <label class="text-sm text-slate-500 mb-2 block">设备名称</label>
         <input type="text" id="deviceName" value="我的设备" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+        <p class="text-xs text-slate-400 mt-1">默认为当前设备信息（如 Windows · Edge），连接建立与 LocalSend 发现时对方会看到此名称</p>
       </div>
       <div>
         <label class="text-sm text-slate-500 mb-2 block">STUN 服务器（用于跨网络连接）</label>
@@ -984,7 +985,9 @@ let receivedBytes = 0;
 const textAssembly = {};         // 长文本分片重组缓冲
 
 // ==================== 账号与云同步 ====================
-let apiBase = 'https://easydrop-account.judiancj.workers.dev';  // 账号 Worker 基地址（可用 ?apiBase= 覆盖，如本地 mock）
+// 账号 API 基地址：默认同源，由 Pages _worker.js 把 /api/* 代理到账号 Worker，
+// 避免客户端直连 *.workers.dev 被网络拦截；本地开发可用 ?apiBase=http://localhost:3456 指向 mock
+let apiBase = '';
 let authToken = localStorage.getItem('easydrop_auth_token') || null;
 let currentUser = null;
 let syncPending = false;         // 正在同步时阻止本地写入覆盖云端
@@ -1220,14 +1223,39 @@ function checkWebRTCSupport() {
 }
 
 // ==================== Identity ====================
+// 默认设备名：从 UA 推断"系统 · 浏览器"，连接建立与 LocalSend 发现时对方看到的就是这个名字
+function detectDeviceName() {
+  try {
+    const ua = navigator.userAgent || '';
+    const src = ((navigator.userAgentData && navigator.userAgentData.platform) || '') + ' ' + ua;
+    let os = '';
+    if (/windows/i.test(src)) os = 'Windows';
+    else if (/android/i.test(src)) os = 'Android';
+    else if (/iphone/i.test(src)) os = 'iPhone';
+    else if (/ipad/i.test(src)) os = 'iPad';
+    else if (/mac os|macintosh|macos/i.test(src)) os = 'macOS';
+    else if (/linux/i.test(src)) os = 'Linux';
+    let browser = '';
+    if (/crios|fxios/i.test(ua)) browser = /crios/i.test(ua) ? 'Chrome' : 'Firefox';
+    else if (/qqbrowser/i.test(ua)) browser = 'QQ浏览器';
+    else if (/edg\//i.test(ua)) browser = 'Edge';
+    else if (/firefox\//i.test(ua)) browser = 'Firefox';
+    else if (/chrome\//i.test(ua)) browser = 'Chrome';
+    else if (/safari\//i.test(ua)) browser = 'Safari';
+    return [os, browser].filter(Boolean).join(' · ') || '我的设备';
+  } catch (e) {
+    return '我的设备';
+  }
+}
+
 function ensureIdentity() {
   try {
     if (!localStorage.getItem('easydrop_device_id')) localStorage.setItem('easydrop_device_id', uuid());
     myDeviceId = localStorage.getItem('easydrop_device_id') || uuid();
-    myDeviceName = localStorage.getItem('easydrop_device_name') || '我的设备';
+    myDeviceName = localStorage.getItem('easydrop_device_name') || detectDeviceName();
   } catch (e) {
     myDeviceId = uuid();
-    myDeviceName = '我的设备';
+    myDeviceName = detectDeviceName();
   }
 }
 
@@ -1640,9 +1668,11 @@ async function connectToFriend(friendId, from = null) {
   dialingFriend = friend;
   if (from !== 'localsend') {
     switchTab('send');
-    hide('sendSetup');
+    // 注意：connectingState 在 sendSetup 内部，只能隐藏兄弟步骤，不能隐藏 sendSetup 本身
+    hide('generateCodeStep');
     hide('shareCodeStep');
     hide('sendInterface');
+    show('sendSetup');
     show('connectingState');
     const t = document.getElementById('connectingText');
     if (t) t.textContent = `正在连接 ${friend.name}...`;
@@ -2202,9 +2232,11 @@ async function dialDevice(deviceId, from = null) {
   dialingFriend = { name: '对方设备', deviceId: deviceId }; // 复用拨号超时与错误处理
   if (from !== 'localsend') {
     switchTab('send');
-    hide('sendSetup');
+    // 注意：connectingState 在 sendSetup 内部，只能隐藏兄弟步骤，不能隐藏 sendSetup 本身
+    hide('generateCodeStep');
     hide('shareCodeStep');
     hide('sendInterface');
+    show('sendSetup');
     show('connectingState');
     const t = document.getElementById('connectingText');
     if (t) t.textContent = '正在请求连接对方设备，等待对方确认...';
@@ -3153,6 +3185,58 @@ function stopRenderHeartbeat(item) {
   }
 }
 
+// 发送队列条目的动态字段（速率/剩余时间、进度条宽度）；结构未变时就地更新，避免重建 DOM 导致布局跳动
+function queueItemMetaHtml(item, metaExtra, accent) {
+  return formatFileSize(item.size) + (metaExtra ? ' · <span class="font-medium ' + (accent ? 'text-accent-500' : 'text-primary-500') + ' tabular-nums">' + metaExtra + '</span>' : '');
+}
+
+function buildQueueItemEl(item, animate) {
+  const iconInfo = getFileIcon(item.name, item.type);
+  const progress = item.progress || 0;
+  let statusText, statusColor, actionHtml, metaExtra = '';
+  if (item.status === 'sending') {
+    statusText = '传输中...'; statusColor = 'text-primary-500';
+    metaExtra = liveTransferMeta(item, item.sentBytes || 0);
+    actionHtml = `<div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div></div>`;
+  } else if (item.status === 'sent') {
+    statusText = '已发送'; statusColor = 'text-green-500';
+    metaExtra = avgTransferMeta(item);
+    actionHtml = `<div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`;
+  } else if (item.status === 'failed') {
+    statusText = '发送失败'; statusColor = 'text-red-500';
+    actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`;
+  } else {
+    statusText = '等待中'; statusColor = 'text-slate-400';
+    actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+  }
+
+  const fileElement = document.createElement('div');
+  fileElement.className = 'glass rounded-2xl p-4' + (animate ? ' animate-slide-up' : '');
+  fileElement.dataset.fid = String(item.id);
+  fileElement.dataset.status = item.status;
+  fileElement.innerHTML = `
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
+          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
+            <span class="text-xs ${statusColor} ml-2" data-status-text>${statusText}</span>
+          </div>
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span data-meta>${queueItemMetaHtml(item, metaExtra, false)}</span>
+          </div>
+          <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
+            <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
+          </div>
+        </div>
+        ${actionHtml}
+      </div>
+    `;
+  return fileElement;
+}
+
 // 渲染节流：大文件传输中不再每个分块都重建整个列表 DOM
 let lastQueueRender = 0;
 function renderFileQueue(force) {
@@ -3162,52 +3246,30 @@ function renderFileQueue(force) {
 
   const queue = document.getElementById('fileQueue');
   if (!queue) return;
-  queue.innerHTML = '';
 
-  fileQueue.forEach(item => {
-    const iconInfo = getFileIcon(item.name, item.type);
-    const progress = item.progress || 0;
-    let statusText, statusColor, actionHtml, metaExtra = '';
-    if (item.status === 'sending') {
-      statusText = '传输中...'; statusColor = 'text-primary-500';
-      metaExtra = liveTransferMeta(item, item.sentBytes || 0);
-      actionHtml = `<div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div></div>`;
-    } else if (item.status === 'sent') {
-      statusText = '已发送'; statusColor = 'text-green-500';
-      metaExtra = avgTransferMeta(item);
-      actionHtml = `<div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`;
-    } else if (item.status === 'failed') {
-      statusText = '发送失败'; statusColor = 'text-red-500';
-      actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`;
+  // 增量更新：仅新增/状态变化时重建对应节点；传输中只改进度条宽度与速率文本，布局保持稳定
+  fileQueue.forEach((item, idx) => {
+    const key = String(item.id);
+    let el = queue.children[idx];
+    if (!el || el.dataset.fid !== key) {
+      el = buildQueueItemEl(item, true); // 真正的新条目才有滑入动画
+      queue.insertBefore(el, queue.children[idx] || null);
+    } else if (el.dataset.status !== item.status) {
+      const next = buildQueueItemEl(item, false); // 状态切换只换节点，不播动画
+      el.replaceWith(next);
+      el = next;
     } else {
-      statusText = '等待中'; statusColor = 'text-slate-400';
-      actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+      if (item.status === 'sending') {
+        const metaEl = el.querySelector('[data-meta]');
+        const html = queueItemMetaHtml(item, liveTransferMeta(item, item.sentBytes || 0), false);
+        if (metaEl && metaEl.innerHTML !== html) metaEl.innerHTML = html;
+      }
+      const bar = el.querySelector('.progress-bar');
+      const w = (item.progress || 0) + '%';
+      if (bar && bar.style.width !== w) bar.style.width = w;
     }
-
-    const fileElement = document.createElement('div');
-    fileElement.className = 'glass rounded-2xl p-4 animate-slide-up';
-    fileElement.innerHTML = `
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
-          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center justify-between mb-1">
-            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
-            <span class="text-xs ${statusColor} ml-2">${statusText}</span>
-          </div>
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>${formatFileSize(item.size)}${metaExtra ? ' · <span class="font-medium text-primary-500">' + metaExtra + '</span>' : ''}</span>
-          </div>
-          <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
-            <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
-          </div>
-        </div>
-        ${actionHtml}
-      </div>
-    `;
-    queue.appendChild(fileElement);
   });
+  while (queue.children.length > fileQueue.length) queue.lastElementChild.remove();
 }
 
 // ==================== Send File ====================
@@ -3472,36 +3534,28 @@ function abortReceive(msg) {
   showToast(`对方中止了 "${item.name}" 的传输`, 'warning');
 }
 
-let lastReceivedRender = 0;
-function renderReceivedFiles(force) {
-  const now = Date.now();
-  if (!force && now - lastReceivedRender < 150) return;
-  lastReceivedRender = now;
+function buildReceivedItemEl(item, animate) {
+  const iconInfo = getFileIcon(item.name, item.type);
+  const progress = item.progress || 0;
+  let statusText, statusColor, actionHtml, metaExtra = '';
+  if (item.status === 'received') {
+    statusText = '已接收'; statusColor = 'text-green-500';
+    metaExtra = avgTransferMeta(item);
+    actionHtml = `<button type="button" data-dl="1" class="w-10 h-10 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-download text-accent-500 text-sm"></i></button>`;
+  } else if (item.status === 'failed') {
+    statusText = '接收失败'; statusColor = 'text-red-500';
+    actionHtml = `<div class="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
+  } else {
+    statusText = '接收中...'; statusColor = 'text-accent-500';
+    metaExtra = liveTransferMeta(item, item.receivedBytes || 0);
+    actionHtml = `<div class="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-accent-500/30 border-t-accent-500 rounded-full animate-spin"></div></div>`;
+  }
 
-  const container = document.getElementById('receivedFiles');
-  if (!container) return;
-  container.innerHTML = '';
-
-  receivedFiles.forEach(item => {
-    const iconInfo = getFileIcon(item.name, item.type);
-    const progress = item.progress || 0;
-    let statusText, statusColor, actionHtml, metaExtra = '';
-    if (item.status === 'received') {
-      statusText = '已接收'; statusColor = 'text-green-500';
-      metaExtra = avgTransferMeta(item);
-      actionHtml = `<button type="button" data-dl="1" class="w-10 h-10 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-download text-accent-500 text-sm"></i></button>`;
-    } else if (item.status === 'failed') {
-      statusText = '接收失败'; statusColor = 'text-red-500';
-      actionHtml = `<div class="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
-    } else {
-      statusText = '接收中...'; statusColor = 'text-accent-500';
-      metaExtra = liveTransferMeta(item, item.receivedBytes || 0);
-      actionHtml = `<div class="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-accent-500/30 border-t-accent-500 rounded-full animate-spin"></div></div>`;
-    }
-
-    const fileElement = document.createElement('div');
-    fileElement.className = 'glass rounded-2xl p-4 animate-slide-up';
-    fileElement.innerHTML = `
+  const fileElement = document.createElement('div');
+  fileElement.className = 'glass rounded-2xl p-4' + (animate ? ' animate-slide-up' : '');
+  fileElement.dataset.fid = String(item.id);
+  fileElement.dataset.status = item.status;
+  fileElement.innerHTML = `
       <div class="flex items-center gap-4">
         <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
           <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
@@ -3509,10 +3563,10 @@ function renderReceivedFiles(force) {
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between mb-1">
             <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
-            <span class="text-xs ${statusColor} ml-2">${statusText}</span>
+            <span class="text-xs ${statusColor} ml-2" data-status-text>${statusText}</span>
           </div>
           <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>${formatFileSize(item.size)}${metaExtra ? ' · <span class="font-medium text-accent-500">' + metaExtra + '</span>' : ''}</span>
+            <span data-meta>${queueItemMetaHtml(item, metaExtra, true)}</span>
           </div>
           <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
             <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
@@ -3521,11 +3575,44 @@ function renderReceivedFiles(force) {
         ${actionHtml}
       </div>
     `;
-    container.appendChild(fileElement);
-    // 通过闭包绑定而非内联 onclick 传参：item.id 源自对端，不进内联 JS 才无注入面
-    const dlBtn = fileElement.querySelector('button[data-dl]');
-    if (dlBtn) dlBtn.onclick = () => downloadReceivedFile(item.id);
+  // 通过闭包绑定而非内联 onclick 传参：item.id 源自对端，不进内联 JS 才无注入面
+  const dlBtn = fileElement.querySelector('button[data-dl]');
+  if (dlBtn) dlBtn.onclick = () => downloadReceivedFile(item.id);
+  return fileElement;
+}
+
+let lastReceivedRender = 0;
+function renderReceivedFiles(force) {
+  const now = Date.now();
+  if (!force && now - lastReceivedRender < 150) return;
+  lastReceivedRender = now;
+
+  const container = document.getElementById('receivedFiles');
+  if (!container) return;
+
+  // 增量更新：仅新增/状态变化时重建对应节点；接收中只改进度条宽度与速率文本，布局保持稳定
+  receivedFiles.forEach((item, idx) => {
+    const key = String(item.id);
+    let el = container.children[idx];
+    if (!el || el.dataset.fid !== key) {
+      el = buildReceivedItemEl(item, true); // 真正的新条目才有滑入动画
+      container.insertBefore(el, container.children[idx] || null);
+    } else if (el.dataset.status !== item.status) {
+      const next = buildReceivedItemEl(item, false); // 状态切换只换节点，不播动画
+      el.replaceWith(next);
+      el = next;
+    } else {
+      if (item.status === 'receiving') {
+        const metaEl = el.querySelector('[data-meta]');
+        const html = queueItemMetaHtml(item, liveTransferMeta(item, item.receivedBytes || 0), true);
+        if (metaEl && metaEl.innerHTML !== html) metaEl.innerHTML = html;
+      }
+      const bar = el.querySelector('.progress-bar');
+      const w = (item.progress || 0) + '%';
+      if (bar && bar.style.width !== w) bar.style.width = w;
+    }
   });
+  while (container.children.length > receivedFiles.length) container.lastElementChild.remove();
 }
 
 function downloadReceivedFile(itemId) {
