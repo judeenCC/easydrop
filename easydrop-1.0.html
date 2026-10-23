@@ -660,7 +660,7 @@ tailwind.config = {
               <button onclick="sendClipboard()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
                 <i class="fas fa-clipboard text-slate-400"></i>
               </button>
-              <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-transparent px-2 text-sm outline-none text-slate-700 placeholder-slate-400" onkeydown="if(event.key==='Enter')sendChatText()">
+              <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-transparent px-2 text-sm outline-none text-slate-700 placeholder-slate-400" onkeydown="if(event.key==='Enter')sendChatText()" onpaste="handleChatPaste(event)">
               <button onclick="sendChatText()" id="chatSendBtn" class="px-4 h-10 rounded-full text-sm font-medium text-primary-500 hover:bg-primary-500/10 transition-all flex-shrink-0 disabled:text-slate-300 disabled:hover:bg-transparent">发送</button>
             </div>
           </div>
@@ -718,8 +718,8 @@ tailwind.config = {
 
     </div>
 
-    <!-- Features Section：mt-auto 沉底，贴近页脚；pt-6 保证内容溢出滚动时与上方内容仍有最小间距 -->
-    <div id="featuresSection" class="mt-auto pt-10 sm:pt-14 w-full max-w-[1680px] mx-auto flex flex-col md:flex-row md:justify-between gap-4 sm:gap-6">
+    <!-- Features Section：紧跟内容流（不再 mt-auto 沉底拉出大空位），底栏由 footer 自身 mt-auto 兜底 -->
+    <div id="featuresSection" class="mt-6 sm:mt-8 w-full max-w-[1680px] mx-auto flex flex-col md:flex-row md:justify-between gap-4 sm:gap-6">
       <div class="glass rounded-2xl p-6 md:w-[calc(33.333%-1rem)] xl:w-[446px] flex-shrink-0">
         <div class="flex items-start gap-5">
           <div class="w-14 h-14 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
@@ -2972,7 +2972,7 @@ function createSession(conn, opts) {
 
     // 握手：向对方交换真实设备身份（双向，双方都能把对方加为好友）
     try {
-      sendControl(s, { type: 'hello', deviceId: myDeviceId, deviceName: myDeviceName });
+      sendControl(s, { type: 'hello', deviceId: myDeviceId, deviceName: myDeviceName, deviceType: SELF_DEVICE_KIND });
     } catch (e) {
       console.warn('握手发送失败:', e);
     }
@@ -3086,7 +3086,9 @@ function onRemoteHello(msg, s) {
   if (!deviceId || deviceId === myDeviceId) return;
   s.identity = {
     deviceId: deviceId,
-    deviceName: (msg.deviceName || '').trim() || '未知设备'
+    deviceName: (msg.deviceName || '').trim() || '未知设备',
+    // 对方设备类型（mobile/desktop）：旧版本对端缺省为空，图标按「与我相反」推测
+    deviceType: (msg.deviceType === 'mobile' || msg.deviceType === 'desktop') ? msg.deviceType : ''
   };
 
   // 识别码自愈迁移：历史版本发生过「信令撞号后覆盖持久化识别码」的bug，
@@ -3236,13 +3238,20 @@ function handleFiles(files) {
   if (s.conn && s.conn.open) processSendQueue(s);
 }
 
+// 在消息输入框直接粘贴文件（截图/复制文件后 Ctrl+V）：有文件即入队发送，纯文本粘贴不走此路径
+function handleChatPaste(ev) {
+  const files = ev.clipboardData && ev.clipboardData.files;
+  if (!files || files.length === 0) return; // 纯文本/富文本粘贴照常
+  ev.preventDefault();
+  handleFiles(files); // 内部自带「尚未连接」提示与排队发送逻辑
+}
+
 // 单文件传输通道：每个会话独立一条；上一个发完自动接着发该会话队列中的下一个
 function processSendQueue(s) {
   if (!s) return;
   if (s.currentTransfer) return;
   if (!s.conn || !s.conn.open) return;
-  const next = s.fileQueue.find(i => i.status === 'pending');
-  if (next) sendFileOn(s, next.id);
+  const next = s.fileQueue.find(i => i.status === 'pending');  if (next) sendFileOn(s, next.id);
 }
 
 function getFileType(filename) {
@@ -3382,16 +3391,23 @@ function queueItemMetaHtml(item, metaExtra, accent) {
   return formatFileSize(item.size) + (metaExtra ? ' · <span class="font-medium ' + (accent ? 'text-accent-500' : 'text-primary-500') + ' tabular-nums">' + metaExtra + '</span>' : '');
 }
 
-// 消息外侧设备图标块（图1新UI）：本端在右、对方在左，蓝色圆角方块；
-// 本机是手机则本端用手机图标、对方用显示器，反之亦然
+// 消息外侧设备图标块（图1新UI）：本端在右、对方在左，蓝色圆角方块。
+// 双方各自按真实设备类型显示 PC/手机图标：本机由 UA 判定，对方经 hello 握手得知；
+// 旧版本对端不发送设备类型时按「与我相反」推测
 const SELF_IS_MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
-const SELF_DEVICE_ICON = SELF_IS_MOBILE ? 'fa-mobile-screen-button' : 'fa-display';
-const PEER_DEVICE_ICON = SELF_IS_MOBILE ? 'fa-display' : 'fa-mobile-screen-button';
+const SELF_DEVICE_KIND = SELF_IS_MOBILE ? 'mobile' : 'desktop';
 
-function chatItemDeviceChipHtml(dir) {
-  const icon = dir === 'out' ? SELF_DEVICE_ICON : PEER_DEVICE_ICON;
+function peerDeviceKind(s) {
+  const t = s && s.identity && s.identity.deviceType;
+  return (t === 'mobile' || t === 'desktop') ? t : (SELF_DEVICE_KIND === 'mobile' ? 'desktop' : 'mobile');
+}
+
+function chatItemDeviceChipHtml(dir, s) {
+  const kind = dir === 'out' ? SELF_DEVICE_KIND : peerDeviceKind(s);
+  const icon = kind === 'mobile' ? 'fa-mobile-screen-button' : 'fa-display';
+  const name = dir === 'out' ? myDeviceName : (s && s.identity ? s.identity.deviceName : '对方设备');
   return `
-    <div class="${dir === 'out' ? 'order-3' : ''} w-9 h-9 sm:w-10 sm:h-10 bg-primary-500 text-white rounded-xl flex items-center justify-center flex-shrink-0 self-center shadow-sm" title="${dir === 'out' ? esc(myDeviceName) : ''}">
+    <div class="${dir === 'out' ? 'order-3' : ''} w-9 h-9 sm:w-10 sm:h-10 bg-primary-500 text-white rounded-xl flex items-center justify-center flex-shrink-0 self-center shadow-sm" title="${esc(name)}">
       <i class="fas ${icon} text-sm"></i>
     </div>
   `;
@@ -3410,7 +3426,7 @@ function buildChatItemEl(entry, s, animate) {
       ? item.content.slice(0, 5000) + '\n…（内容过长，显示已截断，点击复制可获取全文）'
       : item.content;
     wrap.innerHTML = `
-      ${chatItemDeviceChipHtml(entry.dir)}
+      ${chatItemDeviceChipHtml(entry.dir, s)}
       <div class="order-2 max-w-[300px] sm:max-w-[400px] rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-slate-100 text-slate-700 rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
         <div class="flex items-center justify-between gap-3 mb-1">
           <span class="text-xs ${entry.dir === 'out' ? 'text-slate-400' : 'text-slate-400'}">${esc(item.label || '文本消息')}</span>
@@ -3457,7 +3473,7 @@ function buildChatItemEl(entry, s, animate) {
   }
 
   wrap.innerHTML = `
-    ${chatItemDeviceChipHtml(entry.dir)}
+    ${chatItemDeviceChipHtml(entry.dir, s)}
     <div class="order-2 max-w-[400px] sm:max-w-[460px] ${out ? 'bg-slate-100 rounded-2xl rounded-br-md p-3.5' : 'bg-white border border-slate-200 rounded-2xl rounded-bl-md p-3.5'}">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
