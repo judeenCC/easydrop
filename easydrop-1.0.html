@@ -920,6 +920,26 @@ let currentFriendId = null;
 // 设备身份（持久化）：4 位识别码 + 昵称，用于好友识别、直连与 LocalSend 发现
 let myDeviceId = '';             // 4 位识别码（数字+大写字母），同时是 PeerJS 注册 ID 与连接地址参数
 let myDeviceName = '我的设备';    // 昵称（形容词+水果），对方看到的显示名，可在设置中修改
+// 信令 ID 实例后缀：同一身份可能同时存在多个运行实例（同源多标签页/极小概率撞码），
+// 识别码本体绝不改动 —— 只有信令注册 ID 追加 -iXXXX 后缀，各实例仍归属同一身份
+let peerIdSuffix = '';
+
+function tryReadPeerIdSuffix() {
+  try { return sessionStorage.getItem('easydrop_peer_suffix') || ''; } catch (e) { return ''; }
+}
+function savePeerIdSuffix(sfx) {
+  try { sessionStorage.setItem('easydrop_peer_suffix', sfx); } catch (e) { /* noop */ }
+}
+// 本实例的完整信令注册 ID
+function devicePeerId() {
+  return PEER_PREFIX_DEV + myDeviceId + peerIdSuffix;
+}
+
+// 从信令 peer id 解析 4 位设备码（可带实例后缀）
+function deviceCodeFromPeerId(peerId) {
+  const m = String(peerId || '').match(new RegExp('^' + PEER_PREFIX_DEV + '([A-HJ-NP-Z2-9]{4})(?:-[A-Za-z0-9]{1,12})?$'));
+  return m ? m[1] : '';
+}
 
 // 拨号状态（同一时刻最多一条"正在拨出"的线路；入站连接可同时多条排队确认）
 let dialingFriend = null;
@@ -1209,16 +1229,22 @@ function renderFriendsList() {
   updateFriendOnlineIndicators();
 }
 
-// 在线状态：局域网信标或全局信标可见 = 在线（纸飞机蓝色可点），否则灰色
+// 在线状态：局域网信标或全局信标中能看到该识别码（任意实例）= 在线（纸飞机蓝色可点）
+// 注意：记录按实例信令 ID（sid）为键，这里按识别码扫描记录值
+function isDeviceIdSeenLive(deviceId) {
+  if (!deviceId) return false;
+  const match = (rec) => rec && rec.id === deviceId;
+  return lanPeersLive().some(match) || Array.from(presencePeersLive().values()).some(match);
+}
+
 function isFriendOnline(friend) {
-  if (!friend.deviceId) return false;
-  return !!(lanPeers.has(friend.deviceId) || presencePeersLive().has(friend.deviceId));
+  return isDeviceIdSeenLive(friend.deviceId);
 }
 
 function updateFriendOnlineIndicators() {
   document.querySelectorAll('[data-friend-plane]').forEach(btn => {
     const id = btn.getAttribute('data-friend-plane');
-    const online = !!(id && (lanPeers.has(id) || presencePeersLive().has(id)));
+    const online = isDeviceIdSeenLive(id);
     btn.classList.toggle('bg-primary-500', online);
     btn.classList.toggle('hover:bg-primary-600', online);
     btn.classList.toggle('shadow-md', online);
@@ -1352,6 +1378,15 @@ function confirmRemoveFriend(friendId) {
   `;
 }
 
+// 拒绝一个入站连接请求：关闭本地连接，并经信标总线告知发起端
+// （PeerJS 信令服务器没有单连接关闭通知，显式通知可让对方立刻看到结果而非等超时）
+function rejectIncomingConn(conn) {
+  try { conn.close(); } catch (e) { /* noop */ }
+  const callerId = deviceCodeFromPeerId(conn.peer);
+  if (callerId) bcastControl({ kind: 'reject', id: myDeviceId, to: callerId, t: Date.now() });
+  showToast('已拒绝对方的连接请求', 'info');
+}
+
 function closeFriendModal() {
   document.getElementById('friendActionModal').classList.add('hidden');
   currentFriendId = null;
@@ -1359,8 +1394,7 @@ function closeFriendModal() {
   if (pendingIncomingConn) {
     const conn = pendingIncomingConn;
     pendingIncomingConn = null;
-    try { conn.close(); } catch (e) { /* noop */ }
-    showToast('已拒绝对方的连接请求', 'info');
+    rejectIncomingConn(conn);
   }
   showNextIncomingConfirm(); // 队列中还有请求就继续展示下一个
 }
@@ -1419,7 +1453,18 @@ async function connectToFriend(friendId, from = null) {
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial(`连接 ${friend.name} 超时，对方可能不在线`), 20000);
 
-  const conn = devicePeer.connect(PEER_PREFIX_DEV + friend.deviceId, {
+  // 信令路由：同一识别码多实例时优先拨对方最新心跳里的信令 ID（同源多标签页精确互通）
+  const sid = resolvePeerSid(friend.deviceId);
+  if (devicePeer && sid === devicePeer.id) {
+    endDial();
+    clearDialTimeout();
+    dialingFriend = null;
+    hideDialBanner();
+    showToast('该好友的地址与本设备相同，无需连接', 'warning');
+    return;
+  }
+
+  const conn = devicePeer.connect(sid, {
     reliable: true,
     metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
   });
@@ -1429,6 +1474,10 @@ async function connectToFriend(friendId, from = null) {
     dialingFriend = null;
     clearDialTimeout();
     createSession(conn, { isInitiator: true, userConfirm: true, autoAddNext: false });
+  });
+  // 对方在确认前关闭页面或撤回请求 →信令层整点 LEAVE 触发 close
+  conn.on('close', () => {
+    if (dialingFriend === friend) failFriendDial('对方已取消或拒绝了请求');
   });
   conn.on('error', (err) => {
     console.error('好友直连出错:', err);
@@ -1624,7 +1673,7 @@ function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressIn
 let lanBeaconClient = null;
 let lanBrokerOk = false;
 let lanSubnet = 'unknown';
-const lanPeers = new Map();          // deviceId -> { id, name, ts }
+const lanPeers = new Map();          // 实例信令ID(sid) -> { id(识别码), name, sid, ts }
 const LAN_TOPIC_PREFIX = 'easydrop-lan/v1/';
 const LAN_BEACON_INTERVAL = 5000;
 const LAN_PEER_TTL = 16000;          // 3 个周期没收到心跳即视为离线
@@ -1681,11 +1730,16 @@ function lanWsBusUrl() {
 function handleLanBeaconPayload(text) {
   try {
     const msg = JSON.parse(text);
+    if (msg.kind === 'reject') { handleRejectNotice(msg); return; }
     const id = safeId(msg.id);
-    if (!id || id === myDeviceId) return;
+    if (!id) return;
+    const sid = safeId(msg.sid || msg.id);
+    const ownSid = devicePeer && devicePeer.id;
+    // 完全相同实例 = 本机自己；记录按实例信令 ID（sid）为键，同码多实例各自成行
+    if (sid === ownSid || (!msg.sid && id === myDeviceId)) return;
     const name = (typeof msg.name === 'string' && msg.name.trim())
       ? msg.name.trim().slice(0, 40) : '未知设备';
-    lanPeers.set(id, { id: id, name: name, ts: Date.now() });
+    lanPeers.set(sid, { id: id, name: name, sid: sid, ts: Date.now() });
     renderLocalsendList();
     refreshLanStatus();
   } catch (e) { /* 忽略畸形信标 */ }
@@ -1799,7 +1853,9 @@ function scheduleLanRetry() {
 }
 
 function publishLanBeacon() {
-  const payload = JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() });
+  // sid = 本实例的信令注册 ID：同一识别码可能有多个运行实例（同源多标签页），
+  // 拨号端按 sid 精确路由；旧版本无此字段，兼容路径仍按识别码互拨
+  const payload = JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now(), sid: devicePeer ? devicePeer.id : '' });
   if (lanWs && lanWs.readyState === WebSocket.OPEN) {
     try { lanWs.send(payload); } catch (e) { /* noop */ }
     return;
@@ -1811,7 +1867,7 @@ function publishLanBeacon() {
 
 function lanPeersLive() {
   const now = Date.now();
-  lanPeers.forEach((p, id) => { if (now - p.ts > LAN_PEER_TTL) lanPeers.delete(id); });
+  lanPeers.forEach((p, key) => { if (now - p.ts > LAN_PEER_TTL) lanPeers.delete(key); });
   return Array.from(lanPeers.values());
 }
 
@@ -1821,7 +1877,7 @@ function lanPeersLive() {
 // 所有设备都向 GLOBAL 房间广播心跳，好友纸飞机的在线判定与之打通。
 const PRESENCE_TOPIC = 'easydrop-presence/v1/global';
 const PRESENCE_WS_BASE = 'wss://easydrop-ady.pages.dev';
-const presencePeers = new Map();   // deviceId -> { id, name, ts }
+const presencePeers = new Map();   // 实例信令ID(sid) -> { id(识别码), name, sid, t }
 let presenceWs = null;
 let presenceTimer = null;
 let presenceRetryCount = 0;
@@ -1867,23 +1923,61 @@ function initPresenceBeacon() {
   ws.onerror = () => { /* close 会跟随触发 */ };
 }
 
+// 轻量控制消息：复用两条信标总线（全局 presence + 局域网 LAN）搭车广播。
+// 用于拒绝拨号等低频信令；旧版本客户端读到未知字段会安全忽略
+function bcastControl(obj) {
+  const payload = JSON.stringify(obj);
+  if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
+    try { presenceWs.send(payload); } catch (e) { /* noop */ }
+  }
+  if (lanWs && lanWs.readyState === WebSocket.OPEN) {
+    try { lanWs.send(payload); } catch (e) { /* noop */ }
+  } else if (lanBeaconClient && lanBeaconClient.connected) {
+    try { lanBeaconClient.publish(lanTopic(lanSubnet), payload, { qos: 0 }); } catch (e) { /* noop */ }
+  }
+}
+
+// 收到「对方拒绝了我的拨号请求」控制消息时调用（failFriendDial 自带幂等保护：
+// 仅在拨号仍进行中时生效，接受后开启的会话不受影响）
+function handleRejectNotice(msg) {
+  if (!dialingFriend) return;
+  if (safeId(msg.to) === myDeviceId && dialingFriend.deviceId === safeId(msg.id)) {
+    failFriendDial('对方拒绝了连接请求');
+  }
+}
+
 function handlePresencePayload(text) {
   try {
     const msg = JSON.parse(text);
+    if (msg.kind === 'reject') { handleRejectNotice(msg); return; }
     const id = safeId(msg.id);
-    if (!id || id === myDeviceId) return;
+    if (!id) return;
+    // 按实例信令 ID（sid）记录：同识别码多实例（同源多标签页）各为一体
+    const sid = safeId(msg.sid || msg.id);
+    const ownSid = devicePeer && devicePeer.id;
+    if (sid === ownSid || (!msg.sid && id === myDeviceId)) return; // 本机自己的心跳
     if (String(msg.t || 0) < Date.now() - LAN_PEER_TTL) {
-      presencePeers.delete(id);
+      presencePeers.delete(sid);
       updateFriendOnlineIndicators();
       return;
     }
-    presencePeers.set(id, { id: id, name: (typeof msg.name === 'string' ? msg.name : '').slice(0, 40), t: Date.now() });
+    presencePeers.set(sid, {
+      id: id,
+      name: (typeof msg.name === 'string' ? msg.name : '').slice(0, 40),
+      sid: sid,
+      t: Date.now()
+    });
     updateFriendOnlineIndicators();
   } catch (e) { /* 忽略畸形信标 */ }
 }
 
 function publishPresence() {
-  const payload = JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() });
+  const payload = JSON.stringify({
+    id: myDeviceId,
+    name: myDeviceName,
+    t: Date.now(),
+    sid: devicePeer ? devicePeer.id : ''
+  });
   if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
     try { presenceWs.send(payload); } catch (e) { /* noop */ }
   }
@@ -1914,10 +2008,19 @@ function renderLocalsendList() {
   const rows = [];
   const seen = new Set();
   lanPeersLive().forEach(p => {
-    if (p.id === myDeviceId) return;   // 本机不出现在设备列表里
+    // 本机排除：识别码相同且信令 ID 也相同（或旧版无 sid）才算自己；
+    // 识别码相同的其他运行实例（同源多标签页）保留为独立行
+    if (p.id === myDeviceId && (!p.sid || p.sid === (devicePeer && devicePeer.id))) return;
     seen.add(p.id);
     const f = friends.find(fr => fr.deviceId === p.id);
-    rows.push({ deviceId: p.id, friendId: f ? f.id : null, name: f ? f.name : p.name, lan: true, isFriend: !!f });
+    const isSelfAlias = p.id === myDeviceId && !f;
+    rows.push({
+      deviceId: p.id,
+      friendId: f ? f.id : null,
+      name: isSelfAlias ? p.name + '（本机另一窗口）' : (f ? f.name : p.name),
+      lan: true,
+      isFriend: !!f
+    });
   });
   friends.forEach(f => {
     if (!f.deviceId || seen.has(f.deviceId)) return;
@@ -2047,8 +2150,18 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial('对方未响应（可能不在线或拒绝了请求）'), 25000);
 
+  // 信令路由：同识别码多实例（同源多标签页）优先拨对方最新心跳里的信令 ID，
+  // 避免拨到主实例或本实例自身
+  const sid = resolvePeerSid(deviceId);
+  if (devicePeer && sid === devicePeer.id) {
+    endDial();
+    clearDialTimeout();
+    showToast('这是本设备的地址', 'warning');
+    return;
+  }
+
   // metadata 随信令送达，供对方在确认弹窗里看到本机名称（对端不可信，展示时转义）
-  const conn = devicePeer.connect(PEER_PREFIX_DEV + deviceId, {
+  const conn = devicePeer.connect(sid, {
     reliable: true,
     metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
   });
@@ -2060,7 +2173,7 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
     createSession(conn, { isInitiator: true, userConfirm: true, autoAddNext: false, dialPurpose: purpose });
   });
   conn.on('close', () => {
-    if (dialingFriend && dialingFriend.deviceId === deviceId) failFriendDial('对方拒绝了连接请求');
+    if (dialingFriend && dialingFriend.deviceId === deviceId) failFriendDial('对方已取消或拒绝了请求');
   });
   conn.on('error', () => failFriendDial('连接失败，请稍后重试'));
 }
@@ -2072,25 +2185,27 @@ function showIncomingRequestModal(opts) {
   const content = document.getElementById('friendModalContent');
   const name = (opts.name || '').trim();
   const safeName = name ? name.slice(0, 40) : ('设备 ' + (opts.callerId ? opts.callerId.slice(0, 8) : '未知'));
+  const isFriend = !!opts.isFriend;
 
   title.textContent = '连接请求';
   content.innerHTML = `
     <div class="text-center mb-6">
-      <div class="w-16 h-16 rounded-2xl bg-primary-500/15 flex items-center justify-center mx-auto mb-4">
-        <i class="fas fa-tower-broadcast text-2xl text-primary-500"></i>
+      <div class="w-16 h-16 rounded-2xl ${isFriend ? 'bg-green-500/15' : 'bg-primary-500/15'} flex items-center justify-center mx-auto mb-4">
+        <i class="fas ${isFriend ? 'fa-user-group' : 'fa-tower-broadcast'} text-2xl ${isFriend ? 'text-green-500' : 'text-primary-500'}"></i>
       </div>
-      <h4 class="font-semibold text-slate-800 mb-2">${esc(safeName)} 请求连接</h4>
-      <p class="text-sm text-slate-400">对方通过你的连接地址发起请求，确认后建立点对点加密连接</p>
+      <h4 class="font-semibold text-slate-800 mb-2">${isFriend ? '你的好友 ' : ''}${esc(safeName)} 请求连接</h4>
+      <p class="text-sm text-slate-400">${isFriend ? '来自好友列表中的设备，确认后建立点对点加密连接' : '对方通过你的连接地址发起请求，确认后建立点对点加密连接'}</p>
     </div>
     <div class="space-y-3">
       <button id="acceptConnectBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
         <i class="fas fa-check"></i>
         接受连接
       </button>
+      ${isFriend ? '' : `
       <button id="acceptFriendBtn" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
         <i class="fas fa-user-plus"></i>
         接受并添加为好友
-      </button>
+      </button>`}
       <button id="rejectConnectBtn" class="w-full py-3 rounded-xl glass hover:bg-red-50 hover:text-red-500 text-slate-700 font-medium flex items-center justify-center gap-2">
         <i class="fas fa-xmark"></i>
         拒绝
@@ -2103,7 +2218,8 @@ function showIncomingRequestModal(opts) {
     closeFriendModal();
     opts.onAccept(false);
   };
-  document.getElementById('acceptFriendBtn').onclick = () => {
+  const friendBtn = document.getElementById('acceptFriendBtn');
+  if (friendBtn) friendBtn.onclick = () => {
     pendingIncomingConn = null;
     closeFriendModal();
     opts.onAccept(true);
@@ -2225,10 +2341,16 @@ function createPeer(peerId, kind) {
 
 // 入站连接处理：一律不再因"已有连接"而拒绝（支持多会话并行）。
 // 连接码 peer 的入站 = 接收方拨入，本端是发送方，直接建会话；
-// 设备 peer 的入站：好友自动接受；陌生设备弹确认，多个请求依次排队。
+// 设备 peer 的入站：好友与陌生设备一律先弹确认（收端确认是点对点传文件的
+// 标准交互，避免好友链路被静默占用）；多个请求依次排队。
 function handleIncomingConnection(conn, kind) {
   if (sessions.has(conn.peer)) {
     // 同一 peerId 的重复连接（旧连接复用 ID），拒绝一条避免串流
+    try { conn.close(); } catch (e) { /* noop */ }
+    return;
+  }
+  // 自连接兜底：信令 ID 环回（理论上拨号侧已排除本实例）
+  if (devicePeer && conn.peer === devicePeer.id) {
     try { conn.close(); } catch (e) { /* noop */ }
     return;
   }
@@ -2236,14 +2358,7 @@ function handleIncomingConnection(conn, kind) {
     startCodeSessionWithConn(conn);
     return;
   }
-  const peerId = String(conn.peer || '');
-  const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
-  const known = callerId && friends.find(f => f.deviceId === callerId);
-  if (known) {
-    acceptIncomingSession(conn, false);
-    return;
-  }
-  // 陌生设备：入确认队列（一次只弹一个窗，其余等待）
+  // 入确认队列（一次只弹一个窗，其余等待）
   pendingIncomingQueue.push(conn);
   const discardIfGone = () => {
     const i = pendingIncomingQueue.indexOf(conn);
@@ -2274,11 +2389,12 @@ function showNextIncomingConfirm() {
     return;
   }
   pendingIncomingConn = conn;
-  const peerId = String(conn.peer || '');
-  const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+  const callerId = deviceCodeFromPeerId(conn.peer);
+  const isFriend = !!(callerId && friends.find(f => f.deviceId === callerId));
   const meta = conn.metadata || {};
   showIncomingRequestModal({
     callerId,
+    isFriend,
     name: typeof meta.deviceName === 'string' ? meta.deviceName : '',
     onAccept: (asFriend) => {
       pendingIncomingConn = null;
@@ -2288,29 +2404,32 @@ function showNextIncomingConfirm() {
     },
     onReject: () => {
       pendingIncomingConn = null;
-      try { conn.close(); } catch (e) { /* noop */ }
-      showToast('已拒绝对方的连接请求', 'info');
+      rejectIncomingConn(conn);
       showNextIncomingConfirm();
     }
   });
 }
 
-// 接受入站连接并建立会话；known=false 时 hello 后视选择自动加好友
+// 接受入站连接并建立会话；autoAddFriend=选择「接受并加好友」时握手后自动添加。
+// 两种接受（接受 / 接受并加好友）都已由用户明确点击 → 打开后直接进入聊天页
 function acceptIncomingSession(conn, autoAddFriend) {
   createSession(conn, {
     isInitiator: false,
     autoAddNext: !!autoAddFriend,
-    userConfirm: !!autoAddFriend // 只有明确点过"接受并加好友"才弹添加确认，直连好友静默
+    userConfirm: true
   });
 }
 
-// 稳定设备 Peer：用于接收好友直连 / 发起直连与连接码拨号
+// 稳定设备 Peer：用于接收好友直连 / 发起直连与连接码拨号。
+// 同源多标签页（或极小概率撞码）时，后续实例自动改用会话级后缀注册；
+// 持久化识别码绝不覆盖 —— 覆盖会让好友记录指向死码
 function initializePeer() {
+  peerIdSuffix = tryReadPeerIdSuffix();
   if (devicePeer) {
     try { devicePeer.destroy(); } catch (e) { /* noop */ }
     devicePeer = null;
   }
-  devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
+  devicePeer = createPeer(devicePeerId(), 'device');
 }
 
 function handlePeerError(err, kind, p) {
@@ -2340,28 +2459,24 @@ function handlePeerError(err, kind, p) {
           switchTab('send');
         }
       } else if (kind === 'device' && devicePeer === p) {
-        // 识别码注册冲突：可能是旧连接释放延迟，先退避重试；仍冲突则换新码并持久化
+        // 识别码被占用：同源多标签页共用一个身份，第一个标签页持有信令 ID，
+        // 后续实例（或 其他设备撞码）给本实例分配会话级后缀重试。
+        // 绝不覆盖持久化识别码 —— 那会让好友记录与对方存储的地址全部失效
         stableIdRetry = (stableIdRetry || 0) + 1;
-        if (stableIdRetry <= 3) {
-          const delay = stableIdRetry * 1000;
-          console.warn('识别码注册失败，' + delay + 'ms 后重试 (' + stableIdRetry + '/3)');
-          setTimeout(() => {
-            if (devicePeer !== p) return;
-            try { p.destroy(); } catch (e) { /* noop */ }
-            devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
-          }, delay);
-        } else {
-          stableIdRetry = 0;
-          const oldCode = myDeviceId;
-          myDeviceId = generateShortCode();
-          try { localStorage.setItem('easydrop_short_code', myDeviceId); } catch (e) { /* noop */ }
-          console.warn('识别码 ' + oldCode + ' 被占用，已自动更换为 ' + myDeviceId);
-          renderDeviceAddress();
-          renderIdentityCard();
-          try { p.destroy(); } catch (e) { /* noop */ }
-          devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
-          showToast('识别码与其他设备冲突，已自动分配新码 ' + myDeviceId, 'warning');
+        if (stableIdRetry > 6) {
+          showToast('连接服务注册失败，请刷新页面重试', 'error');
+          break;
         }
+        let sfx = stableIdRetry === 1 ? tryReadPeerIdSuffix() : '';
+        if (!sfx) {
+          sfx = '-i' + Math.random().toString(36).slice(2, 6);
+          savePeerIdSuffix(sfx);
+        }
+        peerIdSuffix = sfx;
+        console.warn('识别码 ' + myDeviceId + ' 的信令 ID 被占用，改用实例后缀重试 (' + stableIdRetry + '):', devicePeerId());
+        try { p.destroy(); } catch (e) { /* noop */ }
+        devicePeer = createPeer(devicePeerId(), 'device');
+        if (stableIdRetry === 1) showToast('检测到本设备已在其他窗口打开，本窗口已可独立收发连接', 'info');
       }
       break;
     case 'network':
@@ -2580,15 +2695,34 @@ function hideDialBanner() {
   if (el) el.classList.add('hidden');
 }
 
-// 按 4 位设备码查找已有会话（同一设备重复连接时不再新建）
+// 按 4 位设备码查找已有会话（同一设备重复连接时不再新建）；
+// 兼容带实例后缀的信令 ID（同源多标签页）
 function findSessionByDeviceId(deviceId) {
   if (!deviceId) return null;
   for (const s of sessions.values()) {
     if (s.identity && s.identity.deviceId === deviceId) return s;
     const peerId = String(s.key || '');
-    if (peerId === PEER_PREFIX_DEV + deviceId) return s;
+    if (peerId === PEER_PREFIX_DEV + deviceId || peerId.startsWith(PEER_PREFIX_DEV + deviceId + '-')) return s;
   }
   return null;
+}
+
+// 拨号路由：同一识别码可能有多个运行实例（同源多标签页 / 极小概率撞码），
+// 信标按实例记录了各自最新的信令 ID（sid）。优先取「非本实例」的最新记录；
+// 无信标信息时退回常规注册 ID（主实例 —— 第一个完成注册的运行实例）
+function resolvePeerSid(deviceId) {
+  const ownSid = (devicePeer && devicePeer.id) || '';
+  let best = null;
+  const scan = (rec) => {
+    if (rec && rec.id === deviceId && rec.sid && rec.sid !== ownSid) {
+      const t = rec.ts || rec.t || 0;
+      if (!best || t > (best.ts || best.t || 0)) best = rec;
+    }
+  };
+  lanPeersLive().forEach(scan);
+  presencePeersLive().forEach(scan);
+  if (best) return best.sid;
+  return PEER_PREFIX_DEV + deviceId;
 }
 
 function setActiveSession(key) {
@@ -2616,10 +2750,9 @@ function sessionDisplayName(s) {
   return id ? '设备 ' + id : '对方设备';
 }
 
-// 从 key 中取 4 位设备码（dev 前缀才有意义）
+// 从 key 中取 4 位设备码（兼容实例后缀）
 function sessionPeerCode(s) {
-  const peerId = String(s.key || '');
-  return peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+  return deviceCodeFromPeerId(s.key);
 }
 
 // 会话头像配色：优先好友记录（与好友页一致），否则按名称哈希选色
