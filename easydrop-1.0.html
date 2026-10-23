@@ -418,10 +418,9 @@ tailwind.config = {
             <span class="hidden sm:inline">传输记录</span>
           </button>
 
-          <span id="userStatus" class="flex items-center gap-2 pl-1.5 pr-2 sm:px-3 h-10 sm:h-auto sm:py-1.5 rounded-full glass text-xs flex-shrink-0">
-            <span class="hidden sm:flex w-6 h-6 rounded-full bg-primary-500 items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
-            <span class="hidden sm:inline text-slate-600 font-medium max-w-[7rem] truncate" id="userDisplayName">未登录</span>
-            <button onclick="toggleAuthModal()" class="sm:ml-2 px-1 text-xs underline whitespace-nowrap text-primary-500 hover:text-primary-600" id="userActionBtn">登录</button>
+          <span id="userStatus" class="flex items-center gap-2 px-3 h-10 rounded-full glass text-xs flex-shrink-0" title="我的昵称（可在设置中修改）">
+            <span class="hidden sm:flex w-6 h-6 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
+            <span class="text-slate-600 font-medium max-w-[8rem] truncate" id="userDisplayName">我的设备</span>
           </span>
         </div>
       </div>
@@ -476,43 +475,36 @@ tailwind.config = {
 
         <div class="flex flex-col gap-6">
         <div class="min-w-0">
-        <!-- 我的身份：唯一识别码 + 设备地址 + 统一输入（识别码或连接地址） -->
+        <!-- 我的设备信息：识别码与连接地址整合为一张卡片 -->
         <div id="uidCard" class="glass-strong rounded-2xl p-5 sm:p-6">
-          <div id="uidLoggedOut" class="hidden flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 pb-4 border-b border-slate-200/70">
-            <p class="text-sm text-slate-500">登录账号后将获得唯一识别码，对方可凭识别码添加你为好友或向你发送文件</p>
-            <button onclick="toggleAuthModal()" class="px-5 py-2.5 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap flex-shrink-0">登录 / 注册</button>
-          </div>
-          <div id="uidLoggedIn" class="hidden mb-4 pb-4 border-b border-slate-200/70">
-            <div class="flex items-center justify-between gap-3 mb-4">
-              <div class="min-w-0">
-                <p class="text-sm font-semibold text-slate-700">我的唯一识别码</p>
-                <p class="text-xs text-slate-400">账号专属，对方输入即可添加你为好友或向你发送文件</p>
-              </div>
-              <button onclick="copyMyUid()" class="px-4 py-2 rounded-xl glass hover:bg-slate-100 text-sm text-slate-600 flex-shrink-0">
-                <i class="fas fa-copy mr-1"></i>复制
-              </button>
-            </div>
-            <p id="myUidText" class="code-display text-2xl sm:text-3xl font-bold gradient-text tracking-widest pl-[0.1em] text-center select-all">--------</p>
+          <div class="mb-4 pb-4 border-b border-slate-200/70">
+            <h4 class="text-base font-semibold text-slate-800 mb-1">我的设备信息</h4>
+            <p class="text-xs text-slate-400">对方输入我的IP地址或者唯一识别码，即可添加好友或传输文件；同一局域网、跨网络均可</p>
           </div>
 
-          <div class="flex items-center gap-4 mb-4 pb-4 border-b border-slate-200/70">
-            <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
-              <i class="fas fa-network-wired text-primary-500 text-xl"></i>
+          <div class="flex items-center gap-3 mb-3">
+            <span class="text-sm font-medium text-slate-500 w-20 flex-shrink-0">我的IP：</span>
+            <div class="flex-1 min-w-0 bg-slate-50 rounded-xl border border-slate-200 px-3 py-2 flex items-center gap-2">
+              <p id="myDeviceAddress" class="js-device-address flex-1 min-w-0 text-xs text-slate-600 truncate code-display select-all">生成中...</p>
+              <button onclick="copyDeviceAddress()" class="w-8 h-8 rounded-lg hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
+                <i class="fas fa-copy text-slate-400 text-sm"></i>
+              </button>
             </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-700 mb-1">我的设备IP（连接地址）</p>
-              <p id="myDeviceAddress" class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
-              <p id="myLanIp" class="js-lan-ip text-xs text-slate-400 mt-1">本机IP：检测中...</p>
+          </div>
+          <div class="flex items-center gap-3 mb-4 pb-4 border-b border-slate-200/70">
+            <span class="text-sm font-medium text-slate-500 w-20 flex-shrink-0">我的识别码：</span>
+            <div class="flex-1 min-w-0 bg-slate-50 rounded-xl border border-slate-200 px-3 py-2 flex items-center gap-2">
+              <p id="myUidText" class="flex-1 min-w-0 code-display text-lg font-bold gradient-text tracking-[0.3em] select-all">----</p>
+              <button onclick="copyMyCode()" class="w-8 h-8 rounded-lg hover:bg-slate-200 flex items-center justify-center transition-all flex-shrink-0" title="复制识别码">
+                <i class="fas fa-copy text-slate-400 text-sm"></i>
+              </button>
             </div>
-            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
-              <i class="fas fa-copy text-primary-500"></i>
-            </button>
           </div>
 
           <div>
-            <label class="text-sm text-slate-500 mb-2 block">输入对方的唯一识别码，或粘贴对方的连接地址</label>
+            <label class="text-sm text-slate-500 mb-2 block">输入对方的识别码，或粘贴对方的连接地址</label>
             <div class="flex flex-col sm:flex-row gap-2">
-              <input type="text" id="peerUidInput" autocomplete="off" placeholder="8 位识别码，或 https://…/?connect=xxxxxxxx" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+              <input type="text" id="peerUidInput" autocomplete="off" placeholder="4 位识别码，或 https://…/?connect=XXXX" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
               <div class="flex gap-2">
                 <button onclick="addFriendByInput()" class="flex-1 sm:flex-none px-5 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 text-sm font-medium whitespace-nowrap">
                   <i class="fas fa-user-plus mr-1"></i>添加好友
@@ -522,13 +514,13 @@ tailwind.config = {
                 </button>
               </div>
             </div>
-            <p class="text-xs text-slate-400 mt-2">对方会收到确认弹窗，同意后建立连接或添加为好友；同一局域网、跨网络均可</p>
+            <p class="text-xs text-slate-400 mt-2">对方会收到确认弹窗，同意后建立连接或添加为好友</p>
           </div>
         </div>
 
         </div>
         <div class="min-w-0">
-        <div id="friendsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div id="friendsList" class="flex flex-col gap-3">
           <!-- Friends will be rendered here -->
         </div>
 
@@ -617,80 +609,40 @@ tailwind.config = {
       </div>
 
       <div id="sendInterface" class="hidden page-panel">
-        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
-              <i class="fas fa-check text-green-500"></i>
-            </div>
-            <div>
-              <p class="text-sm font-medium text-slate-700" id="sendPeerLabel">已连接到对方</p>
-              <p class="text-xs text-slate-400">点对点加密连接已建立</p>
+        <!-- 聊天窗口：顶部对方信息 / 中间消息流 / 底部输入区 -->
+        <div class="glass rounded-2xl p-4 mb-4 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div id="chatPeerAvatar" class="friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0">?</div>
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-slate-800 truncate" id="chatPeerName">对方设备</p>
+              <p class="text-xs text-slate-400" id="chatPeerStatus">已连接 · 点对点加密</p>
             </div>
           </div>
-          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
+          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600 flex-shrink-0">
             <i class="fas fa-xmark mr-1"></i>
             断开
           </button>
         </div>
 
-        <div class="flex gap-2 mb-6 overflow-x-auto hide-scrollbar">
-          <button onclick="switchContentType('files')" id="filesTab" class="tab-active whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2">
-            <i class="fas fa-file"></i>
-            <span>文件</span>
-          </button>
-          <button onclick="switchContentType('text')" id="textTab" class="whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
-            <i class="fas fa-font"></i>
-            <span>文本</span>
-          </button>
-          <button onclick="switchContentType('clipboard')" id="clipboardTab" class="whitespace-nowrap px-5 py-2.5 rounded-xl glass text-sm font-medium transition-all flex items-center gap-2 text-slate-400 hover:text-slate-600">
-            <i class="fas fa-clipboard"></i>
-            <span>剪贴板</span>
-          </button>
-        </div>
-
-        <div id="fileSendArea">
-          <div id="dropZone" class="drop-zone rounded-3xl p-6 sm:p-12 text-center cursor-pointer mb-6" onclick="document.getElementById('fileInput').click()">
-            <div class="w-20 h-20 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center">
-              <i class="fas fa-cloud-arrow-up text-3xl text-primary-500"></i>
-            </div>
-            <h3 class="text-xl font-semibold mb-2 text-slate-700">拖放文件到此处</h3>
-            <p class="text-slate-400 text-sm mb-4">或点击选择文件 · 支持所有文件类型</p>
-            <div class="flex flex-wrap justify-center gap-2 text-xs text-slate-400">
-              <span class="px-3 py-1 rounded-full glass">.psd</span>
-              <span class="px-3 py-1 rounded-full glass">.ai</span>
-              <span class="px-3 py-1 rounded-full glass">.cdr</span>
-              <span class="px-3 py-1 rounded-full glass">.pdf</span>
-              <span class="px-3 py-1 rounded-full glass">.tif</span>
-              <span class="px-3 py-1 rounded-full glass">.exe</span>
-              <span class="px-3 py-1 rounded-full glass">所有格式</span>
-            </div>
-            <input type="file" id="fileInput" multiple class="hidden">
-          </div>
-          <div id="fileQueue" class="space-y-3"></div>
-        </div>
-
-        <div id="textSendArea" class="hidden">
-          <div class="glass-strong rounded-3xl p-6">
-            <textarea id="textToSend" placeholder="输入要发送的文本内容..." class="w-full h-40 bg-slate-50 rounded-2xl p-4 text-sm outline-none border border-slate-200 focus:border-primary-500/50 transition-all text-slate-700"></textarea>
-            <button onclick="sendText()" class="mt-4 px-6 py-3 rounded-xl btn-primary text-white font-medium">
-              <i class="fas fa-paper-plane mr-2"></i>
-              发送文本
-            </button>
+        <div id="chatMessages" class="glass-strong rounded-2xl p-4 mb-4 h-[46vh] min-h-[320px] overflow-y-auto flex flex-col gap-3">
+          <div id="chatEmptyHint" class="m-auto text-center text-slate-400 text-sm py-10">
+            <i class="fas fa-share-nodes text-3xl text-slate-300 block mb-3"></i>
+            连接已建立，拖入文件或发送消息开始传输
           </div>
         </div>
 
-        <div id="clipboardSendArea" class="hidden">
-          <div class="glass-strong rounded-3xl p-6 text-center">
-            <div class="w-16 h-16 mx-auto mb-4 rounded-2xl file-icon-bg flex items-center justify-center">
-              <i class="fas fa-clipboard text-2xl text-primary-500"></i>
-            </div>
-            <h3 class="text-lg font-semibold mb-2 text-slate-700">发送剪贴板内容</h3>
-            <p class="text-slate-400 text-sm mb-4">快速分享您当前复制的文本内容</p>
-            <button onclick="sendClipboard()" class="px-6 py-3 rounded-xl btn-primary text-white font-medium">
-              <i class="fas fa-paste mr-2"></i>
-              读取并发送剪贴板
-            </button>
-          </div>
+        <div class="glass rounded-2xl p-3 flex items-center gap-2">
+          <input type="file" id="fileInput" multiple class="hidden">
+          <button onclick="document.getElementById('fileInput').click()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
+            <i class="fas fa-plus text-slate-500"></i>
+          </button>
+          <button onclick="sendClipboard()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
+            <i class="fas fa-clipboard text-slate-500"></i>
+          </button>
+          <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700" onkeydown="if(event.key==='Enter')sendChatText()">
+          <button onclick="sendChatText()" class="px-5 h-11 rounded-xl btn-primary text-white text-sm font-medium flex-shrink-0">
+            <i class="fas fa-paper-plane mr-1"></i>发送
+          </button>
         </div>
       </div>
     </div>
@@ -731,33 +683,6 @@ tailwind.config = {
         </button>
       </div>
 
-      <div id="receiveInterface" class="hidden page-panel">
-        <div class="glass rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center">
-              <i class="fas fa-check text-green-500"></i>
-            </div>
-            <div>
-              <p class="text-sm font-medium text-slate-700" id="receivePeerLabel">已连接到对方</p>
-              <p class="text-xs text-slate-400">准备接收文件</p>
-            </div>
-          </div>
-          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
-            <i class="fas fa-xmark mr-1"></i>
-            断开
-          </button>
-        </div>
-
-        <div id="waitingState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center">
-          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-accent-500/15 to-primary-500/15 flex items-center justify-center">
-            <i class="fas fa-hourglass-half text-3xl text-accent-500"></i>
-          </div>
-          <h3 class="text-xl font-semibold mb-2 text-slate-700">等待接收文件</h3>
-          <p class="text-slate-400 text-sm">发送方可以开始传输文件了</p>
-        </div>
-
-        <div id="receivedFiles" class="space-y-3"></div>
-      </div>
     </div>
 
     <!-- Features Section：mt-auto 沉底，贴近页脚；pt-6 保证内容溢出滚动时与上方内容仍有最小间距 -->
@@ -811,7 +736,7 @@ tailwind.config = {
           </button>
         </div>
 
-        <div id="historyList" class="space-y-3"></div>
+        <div id="historyList" class="glass-strong rounded-2xl px-4"></div>
 
         <div id="historyEmptyState" class="glass-strong rounded-3xl p-6 sm:p-12 text-center hidden">
           <div class="w-20 h-20 mx-auto mb-4 rounded-2xl empty-state-icon flex items-center justify-center">
@@ -894,9 +819,9 @@ tailwind.config = {
     </div>
     <div class="space-y-4">
       <div>
-        <label class="text-sm text-slate-500 mb-2 block">设备名称</label>
+        <label class="text-sm text-slate-500 mb-2 block">我的昵称</label>
         <input type="text" id="deviceName" value="我的设备" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
-        <p class="text-xs text-slate-400 mt-1">默认为当前设备信息（如 Windows · Edge），连接建立与 LocalSend 发现时对方会看到此名称</p>
+        <p class="text-xs text-slate-400 mt-1">自动生成的水果昵称（如"开朗的草莓"），连接建立与 LocalSend 发现时对方会看到此名称，可自行修改</p>
       </div>
       <div>
         <label class="text-sm text-slate-500 mb-2 block">STUN 服务器（用于跨网络连接）</label>
@@ -912,8 +837,8 @@ tailwind.config = {
         <p class="text-xs text-slate-400 mt-1" id="downloadDirHint">文件将保存到浏览器默认下载目录</p>
       </div>
       <div>
-        <label class="text-sm text-slate-500 mb-2 block">设备ID（好友直连使用，无需修改）</label>
-        <div id="deviceIdDisplay" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-xs code-display text-slate-400 break-all select-all">-</div>
+        <label class="text-sm text-slate-500 mb-2 block">我的识别码（好友直连使用，自动分配）</label>
+        <div id="deviceIdDisplay" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm code-display font-bold tracking-[0.3em] text-slate-500 select-all">-</div>
       </div>
     </div>
     <button onclick="saveSettings()" class="mt-2 w-full py-3 rounded-xl btn-primary text-white font-medium">保存设置</button>
@@ -945,7 +870,6 @@ let dataChannel = null;
 let connected = false;
 let isInitiator = false;
 let currentTab = 'friends';
-let currentContentType = 'files';
 let fileQueue = [];
 let receivedFiles = [];
 let transferStats = { sent: 0, received: 0 };
@@ -957,9 +881,9 @@ let stableIdRetry = 0;
 let currentFriendId = null;
 let friends = [];
 
-// 设备身份（持久化，用于好友识别与直连）
-let myDeviceId = '';
-let myDeviceName = '我的设备';
+// 设备身份（持久化）：4 位识别码 + 昵称，用于好友识别、直连与 LocalSend 发现
+let myDeviceId = '';             // 4 位识别码（数字+大写字母），同时是 PeerJS 注册 ID 与连接地址参数
+let myDeviceName = '我的设备';    // 昵称（形容词+水果），对方看到的显示名，可在设置中修改
 let remoteIdentity = null;
 
 // 拨号状态
@@ -978,176 +902,6 @@ let currentReceive = null;       // 正在接收的文件项
 let receivedChunks = [];
 let receivedBytes = 0;
 const textAssembly = {};         // 长文本分片重组缓冲
-
-// ==================== 账号与云同步 ====================
-// 账号 API 基地址：默认同源，由 Pages _worker.js 把 /api/* 代理到账号 Worker，
-// 避免客户端直连 *.workers.dev 被网络拦截；本地开发可用 ?apiBase=http://localhost:3456 指向 mock
-let apiBase = '';
-let authToken = localStorage.getItem('easydrop_auth_token') || null;
-let currentUser = null;
-let syncPending = false;         // 正在同步时阻止本地写入覆盖云端
-
-const AUTH_TOKEN_KEY = 'easydrop_auth_token';
-const USER_KEY = 'easydrop_current_user';
-
-function setAuthToken(token) {
-  authToken = token;
-  try { localStorage.setItem(AUTH_TOKEN_KEY, token); } catch (e) { /* noop */ }
-}
-
-function clearAuthToken() {
-  authToken = null;
-  currentUser = null;
-  try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch (e) { /* noop */ }
-  try { localStorage.removeItem(USER_KEY); } catch (e) { /* noop */ }
-}
-
-async function apiRequest(path, options = {}) {
-  const headers = { 'content-type': 'application/json', ...options.headers };
-  if (authToken) headers['authorization'] = 'Bearer ' + authToken;
-  let res;
-  try {
-    res = await fetch((apiBase || '') + path, { ...options, headers });
-  } catch (e) {
-    showToast('无法连接账号服务，请检查网络或服务地址', 'error');
-    return null;
-  }
-  if (res.status === 401) {
-    // token 过期，清除并提示
-    clearAuthToken();
-    showToast('登录已过期，请重新登录', 'warning');
-    return null;
-  }
-  const data = await res.json().catch(() => null);
-  if (data === null) {
-    showToast('账号服务不可用（HTTP ' + res.status + '），请部署账号服务或通过 ?apiBase= 指定地址', 'error');
-    return null;
-  }
-  return data;
-}
-
-// 用户名：仅数字与小写字母，最多 8 位；密码：数字、大小写字母、符号中至少 2 类，最多 16 位
-const USERNAME_RE = /^[a-z0-9]{1,8}$/;
-const PASSWORD_RULES = [/\d/, /[a-z]/, /[A-Z]/, /[!-\/:-@\[-`{-~]/];
-const PASSWORD_MAX_LEN = 16;
-const PASSWORD_MIN_CLASSES = 2;
-function passwordClassCount(password) {
-  return PASSWORD_RULES.filter(rule => rule.test(password)).length;
-}
-function validateCredentials(username, password) {
-  if (!USERNAME_RE.test(username)) return '用户名只能包含数字和小写字母，且不超过 8 位';
-  if (password.length > PASSWORD_MAX_LEN || passwordClassCount(password) < PASSWORD_MIN_CLASSES) return '密码需至少包含数字、大写字母、小写字母、符号中的 2 类，且不超过 16 位';
-  return null;
-}
-// 强度：弱（不足 8 位或仅 2 类以下）/ 中（2 类或 12 位以下）/ 强（3 类以上且 12 位以上）
-function passwordStrength(password) {
-  if (!password) return { level: 0, label: '' };
-  const classes = passwordClassCount(password);
-  if (password.length < 8 || classes < PASSWORD_MIN_CLASSES) return { level: 1, label: '弱' };
-  if (classes === PASSWORD_MIN_CLASSES || password.length < 12) return { level: 2, label: '中' };
-  return { level: 3, label: '强' };
-}
-function updatePasswordStrength(password) {
-  const s = passwordStrength(password);
-  const fills = ['bg-red-400', 'bg-amber-400', 'bg-green-500'];
-  document.querySelectorAll('#authPwdStrength .pwd-bar').forEach((bar, i) => {
-    bar.className = 'pwd-bar h-1.5 flex-1 rounded-full transition-colors duration-300 ' + (i < s.level ? fills[s.level - 1] : 'bg-slate-200');
-  });
-  const label = document.getElementById('authPwdLevel');
-  if (label) label.textContent = s.label ? '密码强度：' + s.label : '';
-}
-
-// 注册
-async function signUp(username, password, name) {
-  const res = await apiRequest('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({ username, password, name }),
-  });
-  if (!res) return null;
-  if (res.error) { showToast(res.error, 'error'); return null; }
-  setAuthToken(res.token);
-  currentUser = res.user;
-  try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
-  showToast('注册成功', 'success');
-  updateUserStatus();
-  // 好友与记录的云端同步放后台执行，不阻塞关闭弹窗
-  syncFromCloud();
-  return currentUser;
-}
-
-// 登录
-async function signIn(username, password) {
-  const res = await apiRequest('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  });
-  if (!res) return null;
-  if (res.error) { showToast(res.error, 'error'); return null; }
-  setAuthToken(res.token);
-  currentUser = res.user;
-  try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
-  showToast('登录成功', 'success');
-  updateUserStatus();
-  // 好友与记录的云端同步放后台执行，不阻塞关闭弹窗
-  syncFromCloud();
-  return currentUser;
-}
-
-// 登出
-function signOut() {
-  clearAuthToken();
-  friends = [];
-  transferHistory = [];
-  renderFriendsList();
-  renderHistory();
-  updateUserStatus();
-  showToast('已登出', 'info');
-}
-
-// 从云端拉取好友与记录
-async function syncFromCloud() {
-  if (!authToken) return;
-  syncPending = true;
-  try {
-    const [fRes, hRes] = await Promise.all([
-      apiRequest('/api/friends'),
-      apiRequest('/api/history'),
-    ]);
-    if (fRes && !fRes.error && Array.isArray(fRes.friends)) {
-      friends = fRes.friends.map(f => ({ ...f, avatarColors: f.avatarColors || avatarColors[friends.findIndex(x => x.id === f.id) % avatarColors.length] || avatarColors[0] }));
-      saveFriends();
-      renderFriendsList();
-    }
-    if (hRes && !hRes.error && Array.isArray(hRes.history)) {
-      transferHistory = hRes.history;
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory)); } catch (e) { /* noop */ }
-      renderHistory();
-    }
-    showToast('云端数据已同步', 'success');
-  } catch (e) {
-    console.warn('同步失败，使用本地缓存', e);
-  } finally {
-    syncPending = false;
-  }
-}
-
-// 将本地好友推送到云端
-async function pushFriendsToCloud() {
-  if (!authToken || syncPending) return;
-  try {
-    for (const f of friends) {
-      await apiRequest('/api/friends', { method: 'POST', body: JSON.stringify({ name: f.name, deviceId: f.deviceId }) });
-    }
-  } catch (e) { console.warn('推送好友失败', e); }
-}
-
-// 将本地记录推送到云端
-async function pushHistoryToCloud() {
-  if (!authToken || syncPending) return;
-  for (const entry of transferHistory) {
-    await apiRequest('/api/history', { method: 'POST', body: JSON.stringify(entry) });
-  }
-}
 
 // ==================== Protocol Constants ====================
 const PEER_PREFIX_DEV = 'easydrop-dev-';     // 稳定设备 ID 前缀（好友直连用）
@@ -1220,39 +974,52 @@ function checkWebRTCSupport() {
 }
 
 // ==================== Identity ====================
-// 默认设备名：从 UA 推断"系统 · 浏览器"，连接建立与 LocalSend 发现时对方看到的就是这个名字
-function detectDeviceName() {
-  try {
-    const ua = navigator.userAgent || '';
-    const src = ((navigator.userAgentData && navigator.userAgentData.platform) || '') + ' ' + ua;
-    let os = '';
-    if (/windows/i.test(src)) os = 'Windows';
-    else if (/android/i.test(src)) os = 'Android';
-    else if (/iphone/i.test(src)) os = 'iPhone';
-    else if (/ipad/i.test(src)) os = 'iPad';
-    else if (/mac os|macintosh|macos/i.test(src)) os = 'macOS';
-    else if (/linux/i.test(src)) os = 'Linux';
-    let browser = '';
-    if (/crios|fxios/i.test(ua)) browser = /crios/i.test(ua) ? 'Chrome' : 'Firefox';
-    else if (/qqbrowser/i.test(ua)) browser = 'QQ浏览器';
-    else if (/edg\//i.test(ua)) browser = 'Edge';
-    else if (/firefox\//i.test(ua)) browser = 'Firefox';
-    else if (/chrome\//i.test(ua)) browser = 'Chrome';
-    else if (/safari\//i.test(ua)) browser = 'Safari';
-    return [os, browser].filter(Boolean).join(' · ') || '我的设备';
-  } catch (e) {
-    return '我的设备';
-  }
+// 昵称词库：仅正面/中性的形容词与水果名，不含任何侮辱、歧视或负面词汇
+const NICKNAME_ADJ = [
+  '开朗', '活泼', '温柔', '勇敢', '聪明', '可爱', '快乐', '阳光', '善良', '真诚',
+  '优雅', '安静', '热情', '坚强', '乐观', '幸运', '高贵', '漂亮', '开心', '爱笑',
+  '强大', '稳重', '灵巧', '认真', '谦虚', '爽朗', '甜甜', '清新', '自在', '悠闲',
+  '调皮', '呆萌', '沉稳', '灿烂', '温和', '机智', '纯真', '率性', '恬静', '活力'
+];
+const NICKNAME_FRUIT = [
+  '草莓', '芒果', '樱桃', '苹果', '蓝莓', '荔枝', '西瓜', '葡萄', '橙子', '柠檬',
+  '蜜桃', '雪梨', '香蕉', '菠萝', '哈密瓜', '猕猴桃', '火龙果', '石榴', '蜜柚', '枇杷',
+  '杨梅', '蔓越莓', '西番莲', '车厘子', '牛油果', '椰子', '木瓜', '桑葚', '青梅', '甜杏',
+  '香瓜', '莲雾', '芭乐', '龙眼', '黄桃', '蜜瓜'
+];
+function generateNickname() {
+  const adj = NICKNAME_ADJ[Math.floor(Math.random() * NICKNAME_ADJ.length)];
+  const fruit = NICKNAME_FRUIT[Math.floor(Math.random() * NICKNAME_FRUIT.length)];
+  return adj + '的' + fruit;
 }
+
+// 4 位识别码：数字+大写字母（去掉易混淆的 0/O/1/I），作为设备唯一标识
+const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateShortCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  return Array.from(bytes, b => SHORT_CODE_ALPHABET[b % SHORT_CODE_ALPHABET.length]).join('');
+}
+const SHORT_CODE_RE = /^[A-HJ-NP-Z2-9]{4}$/;
 
 function ensureIdentity() {
   try {
-    if (!localStorage.getItem('easydrop_device_id')) localStorage.setItem('easydrop_device_id', uuid());
-    myDeviceId = localStorage.getItem('easydrop_device_id') || uuid();
-    myDeviceName = localStorage.getItem('easydrop_device_name') || detectDeviceName();
+    // 新版身份：4 位识别码（旧版 UUID 身份作废，好友需用新识别码重新添加）
+    let code = localStorage.getItem('easydrop_short_code') || '';
+    if (!SHORT_CODE_RE.test(code)) {
+      code = generateShortCode();
+      localStorage.setItem('easydrop_short_code', code);
+    }
+    myDeviceId = code;
+    // 昵称：旧版自动生成的"系统 · 浏览器"格式视为非用户自定义，升级为水果昵称
+    let name = localStorage.getItem('easydrop_device_name') || '';
+    if (!name || name.includes(' · ')) {
+      name = generateNickname();
+      localStorage.setItem('easydrop_device_name', name);
+    }
+    myDeviceName = name;
   } catch (e) {
-    myDeviceId = uuid();
-    myDeviceName = detectDeviceName();
+    myDeviceId = generateShortCode();
+    myDeviceName = generateNickname();
   }
 }
 
@@ -1273,17 +1040,7 @@ function getIceServers() {
 
 // ==================== Friends Management ====================
 async function loadFriends() {
-  // 已登录且有云端数据时，优先从云端拉取；否则读本地缓存
-  if (authToken && currentUser) {
-    try {
-      const res = await apiRequest('/api/friends');
-      if (res && !res.error && Array.isArray(res.friends) && res.friends.length > 0) {
-        friends = res.friends.map(f => ({ ...f, avatarColors: f.avatarColors || avatarColors[0] }));
-        try { localStorage.setItem('easydrop_friends', JSON.stringify(friends)); } catch (e) { /* noop */ }
-        return;
-      }
-    } catch (e) { console.warn('云端好友加载失败，回退本地', e); }
-  }
+  // 好友数据仅保存在本地浏览器
   try {
     const stored = localStorage.getItem('easydrop_friends');
     friends = stored ? JSON.parse(stored) : [];
@@ -1292,6 +1049,12 @@ async function loadFriends() {
       f.id = safeId(f.id);
       if (f.deviceId) f.deviceId = safeId(f.deviceId);
     });
+    // 旧版 UUID 设备 ID 已作废（新版为 4 位识别码），清理无法再接通的旧好友
+    const before = friends.length;
+    friends = friends.filter(f => !f.deviceId || SHORT_CODE_RE.test(f.deviceId));
+    if (friends.length !== before) {
+      try { localStorage.setItem('easydrop_friends', JSON.stringify(friends)); } catch (e) { /* noop */ }
+    }
   } catch (e) {
     friends = [];
   }
@@ -1303,7 +1066,6 @@ function saveFriends() {
   } catch (e) {
     console.warn('Cannot save friends:', e);
   }
-  if (authToken && !syncPending) pushFriendsToCloud();
 }
 
 function addFriend(name, deviceId) {
@@ -1359,86 +1121,20 @@ function renameFriend(friendId, newName) {
   }
 }
 
-// ==================== 唯一识别码（添加好友 / 发送文件） ====================
-function renderUidCard() {
-  const loggedIn = !!(authToken && currentUser);
-  const on = document.getElementById('uidLoggedIn');
-  const off = document.getElementById('uidLoggedOut');
-  if (!on || !off) return;
-  on.classList.toggle('hidden', !loggedIn);
-  off.classList.toggle('hidden', loggedIn);
+// ==================== 我的识别码（添加好友 / 发送文件） ====================
+function renderIdentityCard() {
   const text = document.getElementById('myUidText');
-  if (text) text.textContent = loggedIn && currentUser.uid ? currentUser.uid : '--------';
+  if (text) text.textContent = myDeviceId || '----';
 }
 
-// 把本机设备 ID 发布到账号下，识别码由此解析到当前设备
-async function publishDevice() {
-  if (!authToken || !currentUser) return;
-  try {
-    await apiRequest('/api/device', { method: 'POST', body: JSON.stringify({ deviceId: myDeviceId, name: myDeviceName }) });
-  } catch (e) { console.warn('设备信息发布失败', e); }
-}
-
-function copyMyUid() {
-  if (!currentUser || !currentUser.uid) return;
-  navigator.clipboard.writeText(currentUser.uid).then(() => {
+function copyMyCode() {
+  if (!myDeviceId) return;
+  navigator.clipboard.writeText(myDeviceId).then(() => {
     showToast('识别码已复制', 'success');
   }).catch(() => showToast('复制失败', 'error'));
 }
 
-async function lookupUid(raw) {
-  if (!authToken || !currentUser) {
-    showToast('请先登录账号，再使用识别码', 'warning');
-    toggleAuthModal();
-    return null;
-  }
-  const code = (raw || '').trim().toUpperCase();
-  if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) {
-    showToast('请输入 8 位识别码（字母或数字）', 'warning');
-    return null;
-  }
-  if (code === currentUser.uid) {
-    showToast('这是你自己的识别码', 'warning');
-    return null;
-  }
-  const res = await apiRequest('/api/users/lookup?uid=' + code);
-  if (!res) return null;
-  if (res.error) {
-    showToast(res.error, 'error');
-    return null;
-  }
-  if (res.deviceId === myDeviceId) {
-    showToast('这是本设备的识别码', 'warning');
-    return null;
-  }
-  return res;
-}
-
-async function addFriendByUid() {
-  const input = document.getElementById('peerUidInput');
-  const info = await lookupUid(input && input.value);
-  if (!info) return;
-  if (friends.some(f => f.deviceId === info.deviceId)) {
-    showToast(info.name + ' 已是好友', 'info');
-    return;
-  }
-  addFriend(info.name, info.deviceId);
-  showToast('已添加好友：' + info.name, 'success');
-  if (input) input.value = '';
-}
-
-async function sendFileByUid() {
-  const input = document.getElementById('peerUidInput');
-  const info = await lookupUid(input && input.value);
-  if (!info) return;
-  const friend = friends.find(f => f.deviceId === info.deviceId);
-  if (friend) {
-    connectToFriend(friend.id);
-    return;
-  }
-  dialPurpose = 'connect';
-  await dialDevice(info.deviceId);
-}
+// 添加好友 / 连接发送统一走拨号流程（对方确认后生效），输入可为 4 位识别码或完整连接地址
 
 function renderFriendsList() {
   const container = document.getElementById('friendsList');
@@ -1456,37 +1152,52 @@ function renderFriendsList() {
 
   friends.forEach(friend => {
     const colors = friend.avatarColors || avatarColors[0];
-    const initials = (friend.name || '?').charAt(0).toUpperCase();
+    const initials = (friend.name || '?').charAt(0);
     const lastTransferText = friend.lastTransfer
-      ? `上次传输: ${formatDate(friend.lastTransfer)}`
+      ? `上次传输：${formatDate(friend.lastTransfer)}`
       : '尚未传输过文件';
 
-    const card = document.createElement('div');
-    card.className = 'friend-card glass rounded-2xl p-5 cursor-pointer';
-    card.onclick = () => showFriendActions(friend.id);
-    card.innerHTML = `
-      <div class="flex items-center gap-4">
-        <div class="friend-avatar w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
-          ${esc(initials)}
-        </div>
-        <div class="flex-1 min-w-0">
-          <h4 class="font-semibold text-slate-800 truncate">${esc(friend.name)}</h4>
-          <p class="text-xs text-slate-400 mt-1">${lastTransferText}</p>
-          <div class="flex items-center gap-3 mt-2">
-            <span class="text-xs text-slate-400">
-              <i class="fas fa-exchange-alt mr-1"></i>
-              ${friend.transferCount || 0} 次传输
-            </span>
-          </div>
-        </div>
-        <div class="flex flex-col gap-2">
-          <button onclick="event.stopPropagation(); connectToFriend('${friend.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all" title="一键直连（对方需在线）">
-            <i class="fas fa-bolt text-primary-500"></i>
-          </button>
-        </div>
+    const row = document.createElement('div');
+    row.className = 'glass rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-white/70 transition-all';
+    row.onclick = () => connectToFriend(friend.id);
+    row.innerHTML = `
+      <div class="friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+        ${esc(initials)}
       </div>
+      <div class="flex-1 min-w-0">
+        <h4 class="font-semibold text-slate-800 truncate">${esc(friend.name)}</h4>
+        <p class="text-xs text-slate-400 mt-0.5">${lastTransferText}</p>
+      </div>
+      <button data-friend-plane="${esc(friend.deviceId || '')}" onclick="event.stopPropagation(); connectToFriend('${friend.id}')" class="w-10 h-10 rounded-xl flex items-center justify-center transition-all flex-shrink-0" title="发起传输">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+      <button onclick="event.stopPropagation(); showFriendActions('${friend.id}')" class="w-8 h-8 rounded-lg hover:bg-slate-200/70 flex items-center justify-center transition-all flex-shrink-0 text-slate-400 text-base leading-none" title="更多操作">⋯</button>
     `;
-    container.appendChild(card);
+    container.appendChild(row);
+  });
+  updateFriendOnlineIndicators();
+}
+
+// 在线状态：局域网信标可见的好友 = 在线（纸飞机蓝色可点），否则灰色
+function isFriendOnline(friend) {
+  return !!(friend.deviceId && lanPeers.has(friend.deviceId));
+}
+
+function updateFriendOnlineIndicators() {
+  document.querySelectorAll('[data-friend-plane]').forEach(btn => {
+    const id = btn.getAttribute('data-friend-plane');
+    const online = !!(id && lanPeers.has(id));
+    btn.classList.toggle('bg-primary-500', online);
+    btn.classList.toggle('hover:bg-primary-600', online);
+    btn.classList.toggle('shadow-md', online);
+    btn.classList.toggle('bg-slate-200/70', !online);
+    const icon = btn.querySelector('i');
+    if (icon) {
+      icon.classList.toggle('text-white', online);
+      icon.classList.toggle('text-slate-400', !online);
+    }
+    // 灰色仅代表局域网未发现（跨网络好友可能仍在线），点击仍会尝试直连
+    btn.title = online ? '对方在线，点击直接发起传输' : '局域网内未发现对方，点击仍会尝试连接';
   });
 }
 
@@ -1700,17 +1411,7 @@ const HISTORY_MAX = 100;
 let transferHistory = [];
 
 async function loadHistory() {
-  // 已登录时优先从云端拉取
-  if (authToken && currentUser) {
-    try {
-      const res = await apiRequest('/api/history');
-      if (res && !res.error && Array.isArray(res.history) && res.history.length > 0) {
-        transferHistory = res.history;
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory)); } catch (e) { /* noop */ }
-        return;
-      }
-    } catch (e) { console.warn('云端记录加载失败，回退本地', e); }
-  }
+  // 传输记录仅保存在本地浏览器
   try {
     const stored = localStorage.getItem(HISTORY_KEY);
     transferHistory = stored ? JSON.parse(stored) : [];
@@ -1733,7 +1434,6 @@ function addHistoryEntry(entry) {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(transferHistory));
   } catch (e) { /* 存储失败不影响传输主流程 */ }
-  if (authToken && !syncPending) pushHistoryToCloud();
 }
 
 function currentPeerName() {
@@ -1748,39 +1448,31 @@ function renderHistory() {
 
   if (transferHistory.length === 0) {
     list.innerHTML = '';
+    list.classList.add('hidden');
     if (empty) empty.classList.remove('hidden');
     if (clearBtn) clearBtn.classList.add('hidden');
     return;
   }
   if (empty) empty.classList.add('hidden');
   if (clearBtn) clearBtn.classList.remove('hidden');
+  list.classList.remove('hidden');
   list.innerHTML = '';
 
-  transferHistory.forEach(item => {
+  transferHistory.forEach((item, idx) => {
     const isIn = item.dir === 'in';
-    const isText = item.kind === 'text';
-    const iconInfo = isText
-      ? { icon: 'fa-font', color: 'text-primary-500', bg: 'bg-primary-500/15' }
-      : (isIn
-        ? { icon: 'fa-arrow-down', color: 'text-accent-500', bg: 'bg-accent-500/15' }
-        : { icon: 'fa-arrow-up', color: 'text-primary-500', bg: 'bg-primary-500/15' });
-    const sizeText = isText ? `${item.size || 0} 字` : formatFileSize(item.size);
-
+    const peerName = item.peer || '对方设备';
+    const colors = avatarColors[idx % avatarColors.length];
     const el = document.createElement('div');
-    el.className = 'glass rounded-2xl p-4';
+    el.className = 'flex items-center gap-3 px-2 py-3 border-b border-slate-100 last:border-b-0';
     el.innerHTML = `
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
-          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center justify-between mb-1">
-            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
-            <span class="text-xs ${isIn ? 'text-accent-500' : 'text-primary-500'} ml-2 flex-shrink-0">${isIn ? '接收' : '发送'}</span>
-          </div>
-          <p class="text-xs text-slate-400">${isIn ? '来自' : '发往'} ${esc(item.peer || '对方设备')} · ${sizeText} · ${formatDate(item.t)}</p>
-        </div>
+      <div class="friend-avatar w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+        ${esc(peerName.charAt(0))}
       </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-slate-700 truncate">${esc(peerName)}</p>
+        <p class="text-xs text-slate-400 truncate mt-0.5">${isIn ? '收到' : '发出'} · ${esc(item.name)}</p>
+      </div>
+      <span class="text-xs text-slate-400 flex-shrink-0">${formatDate(item.t)}</span>
     `;
     list.appendChild(el);
   });
@@ -1805,15 +1497,16 @@ function buildDeviceAddress(deviceId) {
   return location.origin + location.pathname + '?' + CONNECT_PARAM + '=' + (deviceId || myDeviceId);
 }
 
-// 接受三种输入：完整链接 ?connect=ID、原始设备 PeerID easydrop-dev-UUID、裸 UUID
+// 接受：完整链接 ?connect=CODE、原始设备 PeerID easydrop-dev-CODE、裸 4 位识别码
 function parseDeviceAddress(text) {
   const s = String(text || '').trim();
   if (!s) return null;
   let m = s.match(/[?&]connect=([A-Za-z0-9._-]+)/);
-  if (m) return safeId(m[1]);
+  if (m) return safeId(m[1]).toUpperCase();
   m = s.match(/easydrop-dev-([A-Za-z0-9._-]+)/);
-  if (m) return safeId(m[1]);
-  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)) return s;
+  if (m) return safeId(m[1]).toUpperCase();
+  const bare = s.toUpperCase();
+  if (SHORT_CODE_RE.test(bare)) return bare;
   return null;
 }
 
@@ -1870,33 +1563,23 @@ async function updateLanIpDisplay() {
   els.forEach(el => { el.textContent = text; });
 }
 
-// 统一输入：8 位识别码走账号流程，连接地址走设备直连流程
-function identityInputKind() {
-  const input = document.getElementById('peerUidInput');
-  const raw = input ? input.value.trim() : '';
-  if (!raw) return 'empty';
-  if (/^[A-HJ-NP-Z2-9]{8}$/i.test(raw)) return 'uid';
-  if (parseDeviceAddress(raw)) return 'address';
-  return 'invalid';
-}
-
-function identityInputHint(kind) {
-  if (kind === 'empty') showToast('请输入对方的唯一识别码或连接地址', 'warning');
-  else showToast('无法识别：请输入 8 位识别码，或对方的连接地址', 'warning');
-}
-
+// 统一输入：4 位识别码或连接地址，都解析为设备直连拨号
 function addFriendByInput() {
-  const kind = identityInputKind();
-  if (kind === 'uid') return addFriendByUid();
-  if (kind === 'address') return dialByAddress('add-friend', 'peerUidInput');
-  identityInputHint(kind);
+  const input = document.getElementById('peerUidInput');
+  if (!(input && input.value.trim())) {
+    showToast('请输入对方的识别码或连接地址', 'warning');
+    return;
+  }
+  dialByAddress('add-friend', 'peerUidInput');
 }
 
 function connectByInput() {
-  const kind = identityInputKind();
-  if (kind === 'uid') return sendFileByUid();
-  if (kind === 'address') return dialByAddress('connect', 'peerUidInput');
-  identityInputHint(kind);
+  const input = document.getElementById('peerUidInput');
+  if (!(input && input.value.trim())) {
+    showToast('请输入对方的识别码或连接地址', 'warning');
+    return;
+  }
+  dialByAddress('connect', 'peerUidInput');
 }
 function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput', 'localsend'); }
 
@@ -2361,23 +2044,7 @@ function goHome() {
   switchTab('home');
 }
 
-function switchContentType(type) {
-  currentContentType = type;
-  ['files', 'text', 'clipboard'].forEach(t => {
-    const tab = document.getElementById(t + 'Tab');
-    const area = document.getElementById(t + 'SendArea');
-    if (!tab || !area) return;
-    if (t === type) {
-      tab.classList.add('tab-active');
-      tab.classList.remove('text-slate-400');
-      area.classList.remove('hidden');
-    } else {
-      tab.classList.remove('tab-active');
-      tab.classList.add('text-slate-400');
-      area.classList.add('hidden');
-    }
-  });
-}
+// 聊天窗口：消息流统一渲染（文件+文本，发送靠右/接收靠左）
 
 // ==================== 6-Digit Code Generation ====================
 function generate6DigitCode() {
@@ -2516,20 +2183,27 @@ function handlePeerError(err, kind, p) {
           resetConnection();
         }
       } else if (kind === 'device' && peer === p) {
-        // 稳定设备 ID 注册失败：服务器释放旧注册有延迟，退避重试几次
+        // 识别码注册冲突：可能是旧连接释放延迟，先退避重试；仍冲突则换新码并持久化
         stableIdRetry = (stableIdRetry || 0) + 1;
         if (stableIdRetry <= 3) {
           const delay = stableIdRetry * 1000;
-          console.warn('设备ID注册失败，' + delay + 'ms 后重试 (' + stableIdRetry + '/3)');
+          console.warn('识别码注册失败，' + delay + 'ms 后重试 (' + stableIdRetry + '/3)');
           setTimeout(() => {
             if (peer !== p) return;
             try { p.destroy(); } catch (e) { /* noop */ }
             peer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
           }, delay);
         } else {
+          stableIdRetry = 0;
+          const oldCode = myDeviceId;
+          myDeviceId = generateShortCode();
+          try { localStorage.setItem('easydrop_short_code', myDeviceId); } catch (e) { /* noop */ }
+          console.warn('识别码 ' + oldCode + ' 被占用，已自动更换为 ' + myDeviceId);
+          renderDeviceAddress();
+          renderIdentityCard();
           try { p.destroy(); } catch (e) { /* noop */ }
-          peer = createPeer(undefined, 'device-random');
-          showToast('设备ID被占用（可能同一浏览器开了多个页面），本页改用临时ID，刷新页面可恢复好友直连', 'warning');
+          peer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
+          showToast('识别码与其他设备冲突，已自动分配新码 ' + myDeviceId, 'warning');
         }
       } else if (peer === p) {
         // 其他 peer（如随机 ID）出现 unavailable-id：重建一个随机 ID
@@ -2748,14 +2422,18 @@ function cancelDial() {
   showToast('已取消连接', 'info');
 }
 
-// 连接建立后，把发送区域放进 LocalSend 页面；断开后归还给"我要发送"页
+// 连接建立后，聊天窗口按需放进 LocalSend 页面或"我要接收"页；断开后归还给"我要发送"页
 function placeSendInterfaceInLocalsend() {
-  const si = document.getElementById('sendInterface');
-  const session = document.getElementById('localsendSession');
-  if (!si || !session) return;
-  session.appendChild(si);
-  show('sendInterface');
+  placeChatInterfaceIn('localsendSession');
   show('localsendSession');
+}
+
+function placeChatInterfaceIn(parentId) {
+  const si = document.getElementById('sendInterface');
+  const parent = document.getElementById(parentId);
+  if (!si || !parent) return;
+  if (si.parentElement !== parent) parent.appendChild(si);
+  show('sendInterface');
 }
 
 function restoreSendInterface() {
@@ -2798,11 +2476,11 @@ function setupConnection(conn) {
     updateConnectionStatus(true);
 
     if (viaLocalsend) {
-      // LocalSend 来源：留在 LocalSend 页面，发送区域直接放在这里
+      // LocalSend 来源：留在 LocalSend 页面，聊天窗口直接放在这里
       placeSendInterfaceInLocalsend();
       renderLocalsendList();
     } else {
-      // 连接建立：切到对应角色的标签页
+      // 连接建立：双方统一进入聊天窗口（发起方在"我要发送"页，接收方移至"我要接收"页）
       switchTab(isInitiator ? 'send' : 'receive');
 
       if (isInitiator) {
@@ -2812,8 +2490,10 @@ function setupConnection(conn) {
       } else {
         hide('receiveSetup');
         hide('receiveConnecting');
-        show('receiveInterface');
+        placeChatInterfaceIn('receiveMode');
+        show('sendInterface');
       }
+      renderChat(true);
     }
 
     showToast('连接已建立', 'success');
@@ -2934,11 +2614,19 @@ function onRemoteHello(msg) {
     deviceName: (msg.deviceName || '').trim() || '未知设备'
   };
 
-  const label = '已连接到 ' + remoteIdentity.deviceName;
-  const sl = document.getElementById('sendPeerLabel');
-  if (sl) sl.textContent = label;
-  const rl = document.getElementById('receivePeerLabel');
-  if (rl) rl.textContent = label;
+  // 聊天头部显示对方昵称与头像
+  const nameEl = document.getElementById('chatPeerName');
+  if (nameEl) nameEl.textContent = remoteIdentity.deviceName;
+  const avatarEl = document.getElementById('chatPeerAvatar');
+  if (avatarEl) {
+    const friend = friends.find(f => f.deviceId === remoteIdentity.deviceId);
+    const colors = (friend && friend.avatarColors) || avatarColors[(remoteIdentity.deviceId.charCodeAt(0) || 0) % avatarColors.length];
+    avatarEl.style.setProperty('--avatar-color-1', colors[0]);
+    avatarEl.style.setProperty('--avatar-color-2', colors[1]);
+    avatarEl.textContent = remoteIdentity.deviceName.charAt(0);
+  }
+  const statusEl = document.getElementById('chatPeerStatus');
+  if (statusEl) statusEl.textContent = '已连接 · 点对点加密';
 
   const existing = friends.find(f => f.deviceId === remoteIdentity.deviceId);
   if (existing) {
@@ -3018,30 +2706,32 @@ function confirmAddFriend() {
 // ==================== File Handling ====================
 function setupFileInput() {
   const fileInput = document.getElementById('fileInput');
-  const dropZone = document.getElementById('dropZone');
-  if (!fileInput || !dropZone) return;
+  const chatPanel = document.getElementById('sendInterface');
+  if (!fileInput) return;
 
   fileInput.addEventListener('change', (e) => {
     handleFiles(e.target.files);
+    e.target.value = ''; // 允许重复选择同一文件
   });
 
-  ['dragenter', 'dragover'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
+  // 聊天窗口整体作为拖放区
+  if (chatPanel) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      chatPanel.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        chatPanel.classList.add('dragover');
+      });
     });
-  });
-
-  ['dragleave', 'drop'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
+    ['dragleave', 'drop'].forEach(eventName => {
+      chatPanel.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        chatPanel.classList.remove('dragover');
+      });
     });
-  });
-
-  dropZone.addEventListener('drop', (e) => {
-    handleFiles(e.dataTransfer.files);
-  });
+    chatPanel.addEventListener('drop', (e) => {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+  }
 }
 
 function handleFiles(files) {
@@ -3053,11 +2743,22 @@ function handleFiles(files) {
       size: file.size,
       type: file.type || getFileType(file.name),
       progress: 0,
-      status: 'pending'
+      status: 'pending',
+      addedAt: Date.now()
     };
     fileQueue.push(fileItem);
   });
   renderFileQueue(true);
+  // 聊天模式：文件入选后自动排队发送
+  if (connected && dataChannel && dataChannel.open) processSendQueue();
+}
+
+// 单文件传输通道：上一个发完自动接着发队列中的下一个
+function processSendQueue() {
+  if (currentTransfer) return;
+  if (!dataChannel || !dataChannel.open) return;
+  const next = fileQueue.find(i => i.status === 'pending');
+  if (next) sendFile(next.id);
 }
 
 function getFileType(filename) {
@@ -3182,47 +2883,93 @@ function stopRenderHeartbeat(item) {
   }
 }
 
-// 发送队列条目的动态字段（速率/剩余时间、进度条宽度）；结构未变时就地更新，避免重建 DOM 导致布局跳动
+// ==================== 聊天窗口：统一消息流渲染 ====================
+// 文本消息（双向）也进入消息流；文件发送靠右、接收靠左
+let chatTexts = [];  // { id, dir:'in'|'out', label, content, addedAt }
+
+function chatMergedItems() {
+  const out = fileQueue.map(i => ({ ref: i, id: i.id, dir: 'out', kind: 'file', addedAt: i.addedAt || 0 }));
+  const inc = receivedFiles.map(i => ({ ref: i, id: i.id, dir: 'in', kind: 'file', addedAt: i.addedAt || 0 }));
+  const txt = chatTexts.map(i => ({ ref: i, id: i.id, dir: i.dir, kind: 'text', addedAt: i.addedAt || 0 }));
+  return out.concat(inc, txt).sort((a, b) => a.addedAt - b.addedAt);
+}
+
+// 传输条目的动态字段（速率/剩余时间、进度条宽度）；结构未变时就地更新，避免重建 DOM 导致布局跳动
 function queueItemMetaHtml(item, metaExtra, accent) {
   return formatFileSize(item.size) + (metaExtra ? ' · <span class="font-medium ' + (accent ? 'text-accent-500' : 'text-primary-500') + ' tabular-nums">' + metaExtra + '</span>' : '');
 }
 
-function buildQueueItemEl(item, animate) {
-  const iconInfo = getFileIcon(item.name, item.type);
-  const progress = item.progress || 0;
-  let statusText, statusColor, actionHtml, metaExtra = '';
-  if (item.status === 'sending') {
-    statusText = '传输中...'; statusColor = 'text-primary-500';
-    metaExtra = liveTransferMeta(item, item.sentBytes || 0);
-    actionHtml = `<div class="w-10 h-10 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div></div>`;
-  } else if (item.status === 'sent') {
-    statusText = '已发送'; statusColor = 'text-green-500';
-    metaExtra = avgTransferMeta(item);
-    actionHtml = `<div class="w-10 h-10 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`;
-  } else if (item.status === 'failed') {
-    statusText = '发送失败'; statusColor = 'text-red-500';
-    actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`;
-  } else {
-    statusText = '等待中'; statusColor = 'text-slate-400';
-    actionHtml = `<button onclick="sendFile('${item.id}')" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+// 单条消息节点：文件卡片（含进度/状态/操作）或文本气泡；out 靠右、in 靠左
+function buildChatItemEl(entry, animate) {
+  const item = entry.ref;
+  const wrap = document.createElement('div');
+  wrap.className = 'flex ' + (entry.dir === 'out' ? 'justify-end' : 'justify-start') + (animate ? ' animate-slide-up' : '');
+  wrap.dataset.fid = String(entry.id);
+  wrap.dataset.status = entry.kind === 'file' ? item.status : 'text';
+
+  if (entry.kind === 'text') {
+    const display = item.content.length > 5000
+      ? item.content.slice(0, 5000) + '\n…（内容过长，显示已截断，点击复制可获取全文）'
+      : item.content;
+    wrap.innerHTML = `
+      <div class="max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-primary-500 text-white rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
+        <div class="flex items-center justify-between gap-3 mb-1">
+          <span class="text-xs ${entry.dir === 'out' ? 'text-white/70' : 'text-slate-400'}">${esc(item.label || '文本消息')}</span>
+          <button type="button" data-copy class="text-xs ${entry.dir === 'out' ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:text-primary-500'} transition-all flex-shrink-0"><i class="fas fa-copy mr-1"></i>复制</button>
+        </div>
+        <div class="text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">${esc(display)}</div>
+      </div>
+    `;
+    const copyBtn = wrap.querySelector('[data-copy]');
+    if (copyBtn) copyBtn.onclick = () => {
+      navigator.clipboard.writeText(item.content).then(() => showToast('已复制到剪贴板', 'success')).catch(() => showToast('复制失败', 'error'));
+    };
+    return wrap;
   }
 
-  const fileElement = document.createElement('div');
-  fileElement.className = 'glass rounded-2xl p-4' + (animate ? ' animate-slide-up' : '');
-  fileElement.dataset.fid = String(item.id);
-  fileElement.dataset.status = item.status;
-  fileElement.innerHTML = `
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
-          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
+  const iconInfo = getFileIcon(item.name, item.type);
+  const progress = item.progress || 0;
+  const out = entry.dir === 'out';
+  let statusText, statusColor, actionHtml, metaExtra = '';
+  if (item.status === 'sending' || item.status === 'receiving') {
+    const live = out ? liveTransferMeta(item, item.sentBytes || 0) : liveTransferMeta(item, item.receivedBytes || 0);
+    statusText = out ? '传输中...' : '接收中...';
+    statusColor = out ? 'text-primary-500' : 'text-accent-500';
+    metaExtra = live;
+    const spinColor = out ? 'border-primary-500/30 border-t-primary-500' : 'border-accent-500/30 border-t-accent-500';
+    const spinBg = out ? 'bg-primary-500/15' : 'bg-accent-500/15';
+    actionHtml = `<div class="w-9 h-9 rounded-xl ${spinBg} flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 ${spinColor} rounded-full animate-spin"></div></div>`;
+  } else if (item.status === 'sent' || item.status === 'received') {
+    statusText = out ? '已发送' : '已接收';
+    statusColor = 'text-green-500';
+    metaExtra = avgTransferMeta(item);
+    actionHtml = out
+      ? `<div class="w-9 h-9 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`
+      : `<button type="button" data-dl="1" class="w-9 h-9 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0" title="下载"><i class="fas fa-download text-accent-500 text-sm"></i></button>`;
+  } else if (item.status === 'failed') {
+    statusText = out ? '发送失败' : '接收失败';
+    statusColor = 'text-red-500';
+    actionHtml = out
+      ? `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`
+      : `<div class="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
+  } else {
+    statusText = '排队中'; statusColor = 'text-slate-400';
+    actionHtml = `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="立即发送"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="w-full max-w-[520px] ${out ? 'bg-primary-500/10 border border-primary-200/60' : 'bg-white border border-slate-200'} rounded-2xl p-3.5">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
+          <i class="fas ${iconInfo.icon} ${iconInfo.color}"></i>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between mb-1">
             <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
-            <span class="text-xs ${statusColor} ml-2" data-status-text>${statusText}</span>
+            <span class="text-xs ${statusColor} ml-2 flex-shrink-0" data-status-text>${statusText}</span>
           </div>
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span data-meta>${queueItemMetaHtml(item, metaExtra, false)}</span>
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span data-meta>${queueItemMetaHtml(item, metaExtra, !out)}</span>
           </div>
           <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
             <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
@@ -3230,35 +2977,49 @@ function buildQueueItemEl(item, animate) {
         </div>
         ${actionHtml}
       </div>
-    `;
-  return fileElement;
+    </div>
+  `;
+  // 通过闭包绑定而非内联 onclick 传参：item.id 可能源自对端，不进内联 JS 才无注入面
+  const dlBtn = wrap.querySelector('button[data-dl]');
+  if (dlBtn) dlBtn.onclick = () => downloadReceivedFile(item.id);
+  const retryBtn = wrap.querySelector('button[data-retry]');
+  if (retryBtn) retryBtn.onclick = () => sendFile(item.id);
+  return wrap;
 }
 
 // 渲染节流：大文件传输中不再每个分块都重建整个列表 DOM
 let lastQueueRender = 0;
-function renderFileQueue(force) {
+function renderChat(force) {
   const now = Date.now();
   if (!force && now - lastQueueRender < 150) return;
   lastQueueRender = now;
 
-  const queue = document.getElementById('fileQueue');
-  if (!queue) return;
+  const box = document.getElementById('chatMessages');
+  if (!box) return;
+  const merged = chatMergedItems();
+
+  const hint = document.getElementById('chatEmptyHint');
+  if (hint) hint.classList.toggle('hidden', merged.length > 0);
 
   // 增量更新：仅新增/状态变化时重建对应节点；传输中只改进度条宽度与速率文本，布局保持稳定
-  fileQueue.forEach((item, idx) => {
-    const key = String(item.id);
-    let el = queue.children[idx];
+  const anchorOffset = 1; // 空状态提示固定占第 0 位
+  merged.forEach((entry, idx) => {
+    const key = String(entry.id);
+    const pos = idx + anchorOffset;
+    let el = box.children[pos];
     if (!el || el.dataset.fid !== key) {
-      el = buildQueueItemEl(item, true); // 真正的新条目才有滑入动画
-      queue.insertBefore(el, queue.children[idx] || null);
-    } else if (el.dataset.status !== item.status) {
-      const next = buildQueueItemEl(item, false); // 状态切换只换节点，不播动画
+      el = buildChatItemEl(entry, true); // 真正的新条目才有滑入动画
+      box.insertBefore(el, box.children[pos] || null);
+    } else if (el.dataset.status !== (entry.kind === 'file' ? entry.ref.status : 'text')) {
+      const next = buildChatItemEl(entry, false); // 状态切换只换节点，不播动画
       el.replaceWith(next);
       el = next;
-    } else {
-      if (item.status === 'sending') {
+    } else if (entry.kind === 'file') {
+      const item = entry.ref;
+      if (item.status === 'sending' || item.status === 'receiving') {
         const metaEl = el.querySelector('[data-meta]');
-        const html = queueItemMetaHtml(item, liveTransferMeta(item, item.sentBytes || 0), false);
+        const live = item.status === 'sending' ? liveTransferMeta(item, item.sentBytes || 0) : liveTransferMeta(item, item.receivedBytes || 0);
+        const html = queueItemMetaHtml(item, live, item.status === 'receiving');
         if (metaEl && metaEl.innerHTML !== html) metaEl.innerHTML = html;
       }
       const bar = el.querySelector('.progress-bar');
@@ -3266,8 +3027,14 @@ function renderFileQueue(force) {
       if (bar && bar.style.width !== w) bar.style.width = w;
     }
   });
-  while (queue.children.length > fileQueue.length) queue.lastElementChild.remove();
+  while (box.children.length > merged.length + anchorOffset) box.lastElementChild.remove();
+
+  // 新内容出现时滚到底部（用户上翻查看时不强制拉回）
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  if (nearBottom) box.scrollTop = box.scrollHeight;
 }
+
+function renderFileQueue(force) { renderChat(force); }
 
 // ==================== Send File ====================
 // 关键修复：
@@ -3355,6 +3122,8 @@ async function sendFile(fileId) {
   } finally {
     stopRenderHeartbeat(item);
     currentTransfer = null;
+    // 队列中还有等待的文件则自动接续发送
+    setTimeout(processSendQueue, 50);
   }
 }
 
@@ -3376,9 +3145,15 @@ function waitForDrain(frameCount) {
 }
 
 // ==================== Send Text ====================
-function sendText() {
-  const textarea = document.getElementById('textToSend');
-  const text = textarea ? textarea.value.trim() : '';
+// 发送的文本进入消息流（靠右气泡），与收到的文本（靠左）共用时间线
+function pushChatText(dir, label, content) {
+  chatTexts.push({ id: 't' + Date.now() + Math.random(), dir, label, content, addedAt: Date.now() });
+  renderChat(true);
+}
+
+function sendChatText() {
+  const input = document.getElementById('chatTextInput');
+  const text = input ? input.value.trim() : '';
   if (!text) {
     showToast('请输入文本内容', 'warning');
     return;
@@ -3388,8 +3163,8 @@ function sendText() {
     return;
   }
   if (sendTextMessage(text, 'text-message')) {
-    textarea.value = '';
-    showToast('文本已发送', 'success');
+    input.value = '';
+    pushChatText('out', '文本消息', text);
   }
 }
 
@@ -3406,6 +3181,7 @@ async function sendClipboard() {
       return;
     }
     if (sendTextMessage(text, 'clipboard-content')) {
+      pushChatText('out', '剪贴板内容', text);
       showToast('剪贴板内容已发送', 'success');
     }
   } catch (error) {
@@ -3464,7 +3240,8 @@ function beginReceive(msg) {
     blob: null,
     samples: [{ t: Date.now(), b: 0 }],
     receivedBytes: 0,
-    totalMs: null
+    totalMs: null,
+    addedAt: Date.now()
   };
   receivedFiles.push(item);
   currentReceive = item;
@@ -3473,7 +3250,6 @@ function beginReceive(msg) {
   item._t0 = Date.now();
   startRenderHeartbeat(item, renderReceivedFiles);
 
-  hide('waitingState');
   renderReceivedFiles(true);
 }
 
@@ -3531,86 +3307,7 @@ function abortReceive(msg) {
   showToast(`对方中止了 "${item.name}" 的传输`, 'warning');
 }
 
-function buildReceivedItemEl(item, animate) {
-  const iconInfo = getFileIcon(item.name, item.type);
-  const progress = item.progress || 0;
-  let statusText, statusColor, actionHtml, metaExtra = '';
-  if (item.status === 'received') {
-    statusText = '已接收'; statusColor = 'text-green-500';
-    metaExtra = avgTransferMeta(item);
-    actionHtml = `<button type="button" data-dl="1" class="w-10 h-10 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0"><i class="fas fa-download text-accent-500 text-sm"></i></button>`;
-  } else if (item.status === 'failed') {
-    statusText = '接收失败'; statusColor = 'text-red-500';
-    actionHtml = `<div class="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
-  } else {
-    statusText = '接收中...'; statusColor = 'text-accent-500';
-    metaExtra = liveTransferMeta(item, item.receivedBytes || 0);
-    actionHtml = `<div class="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center flex-shrink-0"><div class="w-4 h-4 border-2 border-accent-500/30 border-t-accent-500 rounded-full animate-spin"></div></div>`;
-  }
-
-  const fileElement = document.createElement('div');
-  fileElement.className = 'glass rounded-2xl p-4' + (animate ? ' animate-slide-up' : '');
-  fileElement.dataset.fid = String(item.id);
-  fileElement.dataset.status = item.status;
-  fileElement.innerHTML = `
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
-          <i class="fas ${iconInfo.icon} ${iconInfo.color} text-lg"></i>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center justify-between mb-1">
-            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
-            <span class="text-xs ${statusColor} ml-2" data-status-text>${statusText}</span>
-          </div>
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span data-meta>${queueItemMetaHtml(item, metaExtra, true)}</span>
-          </div>
-          <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
-            <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
-          </div>
-        </div>
-        ${actionHtml}
-      </div>
-    `;
-  // 通过闭包绑定而非内联 onclick 传参：item.id 源自对端，不进内联 JS 才无注入面
-  const dlBtn = fileElement.querySelector('button[data-dl]');
-  if (dlBtn) dlBtn.onclick = () => downloadReceivedFile(item.id);
-  return fileElement;
-}
-
-let lastReceivedRender = 0;
-function renderReceivedFiles(force) {
-  const now = Date.now();
-  if (!force && now - lastReceivedRender < 150) return;
-  lastReceivedRender = now;
-
-  const container = document.getElementById('receivedFiles');
-  if (!container) return;
-
-  // 增量更新：仅新增/状态变化时重建对应节点；接收中只改进度条宽度与速率文本，布局保持稳定
-  receivedFiles.forEach((item, idx) => {
-    const key = String(item.id);
-    let el = container.children[idx];
-    if (!el || el.dataset.fid !== key) {
-      el = buildReceivedItemEl(item, true); // 真正的新条目才有滑入动画
-      container.insertBefore(el, container.children[idx] || null);
-    } else if (el.dataset.status !== item.status) {
-      const next = buildReceivedItemEl(item, false); // 状态切换只换节点，不播动画
-      el.replaceWith(next);
-      el = next;
-    } else {
-      if (item.status === 'receiving') {
-        const metaEl = el.querySelector('[data-meta]');
-        const html = queueItemMetaHtml(item, liveTransferMeta(item, item.receivedBytes || 0), true);
-        if (metaEl && metaEl.innerHTML !== html) metaEl.innerHTML = html;
-      }
-      const bar = el.querySelector('.progress-bar');
-      const w = (item.progress || 0) + '%';
-      if (bar && bar.style.width !== w) bar.style.width = w;
-    }
-  });
-  while (container.children.length > receivedFiles.length) container.lastElementChild.remove();
-}
+function renderReceivedFiles(force) { renderChat(force); }
 
 function downloadReceivedFile(itemId) {
   const item = receivedFiles.find(f => String(f.id) === String(itemId));
@@ -3632,47 +3329,10 @@ function downloadFile(blob, filename) {
 }
 
 function showReceivedText(content, label) {
-  hide('waitingState');
   if (typeof content !== 'string') return;
-
-  const display = content.length > 5000
-    ? content.slice(0, 5000) + '\n…（内容过长，显示已截断，点击复制可获取全文）'
-    : content;
-
-  const container = document.getElementById('receivedFiles');
-  if (!container) return;
-
-  const textElement = document.createElement('div');
-  textElement.className = 'glass rounded-2xl p-4 animate-slide-up';
-  textElement.innerHTML = `
-    <div class="flex items-start gap-4">
-      <div class="w-12 h-12 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
-        <i class="fas fa-font text-primary-500 text-lg"></i>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center justify-between mb-2">
-          <p class="text-sm font-medium text-slate-700">${esc(label)}</p>
-          <button onclick="copyTextToClipboard(this)" data-text="${esc(content)}" class="text-xs text-slate-400 hover:text-primary-500 transition-all">
-            <i class="fas fa-copy mr-1"></i>复制
-          </button>
-        </div>
-        <div class="bg-slate-50 rounded-xl p-3 text-sm text-slate-600 max-h-32 overflow-y-auto whitespace-pre-wrap break-all">${esc(display)}</div>
-      </div>
-    </div>
-  `;
-  container.prepend(textElement);
+  pushChatText('in', label, content);
   showToast(`收到${label}`, 'success');
   addHistoryEntry({ dir: 'in', kind: 'text', name: label, size: content.length, peer: currentPeerName() });
-}
-
-function copyTextToClipboard(button) {
-  const text = button.dataset.text;
-  if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    showToast('已复制到剪贴板', 'success');
-  }).catch(() => {
-    showToast('复制失败', 'error');
-  });
 }
 
 // ==================== Connection Management ====================
@@ -3698,6 +3358,7 @@ function resetConnection() {
   currentReceive = null;
   fileQueue = [];
   receivedFiles = [];
+  chatTexts = [];
   receivedChunks = [];
   receivedBytes = 0;
   sessionCode = null;
@@ -3719,8 +3380,6 @@ function resetConnection() {
   hide('sendInterface');
   show('receiveSetup');
   hide('receiveConnecting');
-  hide('receiveInterface');
-  show('waitingState');
   if (wasLocalSession) renderLocalsendList();
   else switchTab('home');
 
@@ -3728,10 +3387,21 @@ function resetConnection() {
   if (codeDisplay) codeDisplay.textContent = '------';
   const offerCodeInput = document.getElementById('offerCodeInput');
   if (offerCodeInput) offerCodeInput.value = '';
-  const fileQueueEl = document.getElementById('fileQueue');
-  if (fileQueueEl) fileQueueEl.innerHTML = '';
-  const receivedFilesEl = document.getElementById('receivedFiles');
-  if (receivedFilesEl) receivedFilesEl.innerHTML = '';
+  // 聊天消息流复位：清空所有消息节点，只留空状态提示
+  const chatBox = document.getElementById('chatMessages');
+  if (chatBox) {
+    const hint = document.getElementById('chatEmptyHint');
+    chatBox.innerHTML = '';
+    if (hint) chatBox.appendChild(hint);
+    const hintEl = document.getElementById('chatEmptyHint');
+    if (hintEl) hintEl.classList.remove('hidden');
+  }
+  const nameEl = document.getElementById('chatPeerName');
+  if (nameEl) nameEl.textContent = '对方设备';
+  const avatarEl = document.getElementById('chatPeerAvatar');
+  if (avatarEl) avatarEl.textContent = '?';
+  const textInput = document.getElementById('chatTextInput');
+  if (textInput) textInput.value = '';
 
   // 恢复稳定设备 Peer（可接收好友直连）。
   // 若当前 peer 已是设备类 peer（接收方/被直连方直接从 stable peer 发起连接的场景），
@@ -3947,7 +3617,7 @@ function saveSettings() {
     try { localStorage.setItem('easydrop_stun', stun); } catch (e) { /* noop */ }
   }
   updateHomeInfo();
-  publishDevice();
+  updateUserStatus();
   showToast('设置已保存，连接相关设置将在下次建立连接时生效', 'success');
   toggleSettings();
 }
@@ -3978,26 +3648,12 @@ function updateHomeInfo() {
 }
 
 function updateUserStatus() {
-  const statusEl = document.getElementById('userStatus');
+  // 头部胶囊展示本机昵称（自动生成的水果昵称，可在设置中修改）
   const nameEl = document.getElementById('userDisplayName');
   const avatarEl = document.getElementById('userAvatar');
-  const actionEl = document.getElementById('userActionBtn');
-  if (!statusEl) return;
-  if (currentUser) {
-    statusEl.classList.remove('hidden');
-    nameEl.textContent = currentUser.name || currentUser.username;
-    avatarEl.textContent = (currentUser.name || currentUser.username || '?').charAt(0).toUpperCase();
-    actionEl.textContent = '登出';
-    actionEl.onclick = signOut;
-  } else {
-    statusEl.classList.remove('hidden');
-    nameEl.textContent = '未登录';
-    avatarEl.textContent = '?';
-    actionEl.textContent = '登录';
-    actionEl.onclick = toggleAuthModal;
-  }
-  renderUidCard();
-  if (currentUser) publishDevice();
+  if (nameEl) nameEl.textContent = myDeviceName || '我的设备';
+  if (avatarEl) avatarEl.textContent = (myDeviceName || '我').charAt(0);
+  renderIdentityCard();
 }
 
 function showToast(message, type = 'info') {
@@ -4033,99 +3689,9 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
-function toggleAuthModal() {
-  const modal = document.getElementById('authModal');
-  if (!modal) return;
-  const isHidden = modal.classList.contains('hidden');
-  if (isHidden) {
-    modal.classList.remove('hidden');
-    // 每次打开都回到登录模式，避免上次停在注册页
-    setAuthMode('login');
-    document.getElementById('authUsername').value = '';
-    document.getElementById('authPassword').value = '';
-    updatePasswordStrength('');
-    document.getElementById('authName').value = '';
-  } else {
-    modal.classList.add('hidden');
-  }
-}
-
-// 提交期间按钮进入加载态，让用户明确感知请求在进行
-function setAuthLoading(loading) {
-  const btn = document.getElementById('authSubmitBtn');
-  if (!btn) return;
-  btn.disabled = loading;
-  btn.classList.toggle('opacity-80', loading);
-  btn.classList.toggle('cursor-not-allowed', loading);
-  if (loading) {
-    btn.dataset.label = btn.textContent;
-    btn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin align-[-3px] mr-2"></span>请稍候...';
-  } else {
-    btn.textContent = btn.dataset.label || (document.getElementById('authMode').value === 'signup' ? '注册' : '登录');
-  }
-}
-
-async function handleAuthSubmit(e) {
-  e.preventDefault();
-  const mode = document.getElementById('authMode').value; // 'login' | 'signup'
-  const username = document.getElementById('authUsername').value.trim();
-  const password = document.getElementById('authPassword').value;
-  const name = document.getElementById('authName').value.trim();
-  if (!username || !password) { showToast('请填写用户名与密码', 'error'); return; }
-  if (mode === 'signup') {
-    const invalid = validateCredentials(username, password);
-    if (invalid) { showToast(invalid, 'error'); return; }
-  }
-  setAuthLoading(true);
-  try {
-    if (mode === 'signup') {
-      await signUp(username, password, name || username);
-    } else {
-      await signIn(username, password);
-    }
-  } finally {
-    setAuthLoading(false);
-  }
-  if (currentUser) toggleAuthModal();
-}
-
-function setAuthMode(mode) {
-  const isSignup = mode === 'signup';
-  document.getElementById('authMode').value = mode;
-  document.getElementById('authTitle').textContent = isSignup ? '账号注册' : '账号登录';
-  document.getElementById('authNameField').classList.toggle('hidden', !isSignup);
-  document.getElementById('authPwdHint').classList.toggle('hidden', !isSignup);
-  document.getElementById('authSubmitBtn').textContent = isSignup ? '注册' : '登录';
-  document.getElementById('authToggle').innerHTML = isSignup
-    ? '已有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">直接登录</button>'
-    : '没有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">立即注册</button>';
-}
-
-function switchAuthMode() {
-  setAuthMode(document.getElementById('authMode').value === 'login' ? 'signup' : 'login');
-}
-
 // ==================== Initialize ====================
 document.addEventListener('DOMContentLoaded', async () => {
   ensureIdentity();
-  // 读取 URL 参数 ?apiBase= 以指向账号云同步后端（本地 mock 或部署后的 Worker）
-  try {
-    const params = new URLSearchParams(location.search);
-    const p = params.get('apiBase');
-    if (p) apiBase = p;
-  } catch (e) { /* noop */ }
-  // 恢复登录状态
-  if (authToken) {
-    try {
-      const me = await apiRequest('/api/auth/me');
-      if (me && !me.error && me.user) {
-        currentUser = me.user;
-        try { localStorage.setItem(USER_KEY, JSON.stringify(currentUser)); } catch (e) { /* noop */ }
-      } else {
-        clearAuthToken();
-      }
-    } catch (e) { clearAuthToken(); }
-  }
   loadFriends();
   renderFriendsList();
   setupFileInput();
@@ -4163,12 +3729,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderLocalsendList();
       refreshLanStatus();
     }
+    const fMode = document.getElementById('friendsMode');
+    if (fMode && !fMode.classList.contains('hidden')) {
+      updateFriendOnlineIndicators();
+    }
   }, 5000);
 
   // 地址栏带 ?connect=：点开对方分享的地址即自动发起请求（对方仍需确认）
   try {
     const params = new URLSearchParams(location.search);
-    const connectTarget = safeId(params.get(CONNECT_PARAM) || '');
+    const connectTarget = safeId(params.get(CONNECT_PARAM) || '').toUpperCase();
     if (connectTarget) {
       try { history.replaceState(null, '', location.pathname); } catch (e) { /* noop */ }
       if (connectTarget === myDeviceId) {
@@ -4208,66 +3778,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 500);
   }
 
-  // 登录/注册模态框提交
-  const authForm = document.getElementById('authForm');
-  if (authForm) authForm.addEventListener('submit', handleAuthSubmit);
-  document.getElementById('authModal').addEventListener('click', (e) => {
-    if (e.target.id === 'authModal') toggleAuthModal();
-  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.getElementById('settingsModal').classList.add('hidden');
       closeFriendModal();
       goHome();
-      document.getElementById('authModal').classList.add('hidden');
     }
   });
 });
 
 </script>
 
-<!-- 登录/注册模态框 -->
-<div id="authModal" class="fixed inset-0 z-[60] hidden flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-  <div class="bg-white rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl animate-fade-in">
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-      <h3 class="text-xl font-bold text-slate-800" id="authTitle">账号登录</h3>
-      <button onclick="toggleAuthModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
-    </div>
-    <form id="authForm" class="space-y-4">
-      <input type="hidden" id="authMode" value="login">
-      <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">用户名</label>
-        <input id="authUsername" type="text" maxlength="8" autocomplete="username" required class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="数字或小写字母，最多 8 位">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">密码</label>
-        <input id="authPassword" type="password" maxlength="16" required autocomplete="current-password" oninput="updatePasswordStrength(this.value)" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="••••••••">
-        <div id="authPwdHint" class="hidden mt-2">
-          <div id="authPwdStrength" class="flex gap-1.5">
-            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
-            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
-            <span class="pwd-bar h-1.5 flex-1 rounded-full bg-slate-200"></span>
-          </div>
-          <div class="flex justify-between items-center text-xs mt-1.5">
-            <span id="authPwdLevel" class="text-slate-500 font-medium"></span>
-            <span class="text-slate-400">数字、大小写字母、符号至少 2 类，最多 16 位</span>
-          </div>
-          <p class="text-xs text-slate-400 mt-1">安全建议：12 位以上，同时包含大小写字母、数字和符号，效果最佳</p>
-        </div>
-      </div>
-      <div id="authNameField" class="hidden">
-        <label class="block text-xs font-medium text-slate-600 mb-1">昵称</label>
-        <input id="authName" type="text" class="w-full px-3 py-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-500 outline-none text-slate-700" placeholder="易传">
-      </div>
-      <p class="text-xs text-slate-400 text-center" id="authToggle">
-        没有账号？<button type="button" onclick="switchAuthMode()" class="text-primary-500 font-medium underline hover:text-primary-600">立即注册</button>
-      </p>
-      <button type="submit" id="authSubmitBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium">登录</button>
-    </form>
-    <p class="text-xs text-slate-400 text-center mt-5 leading-relaxed">
-      登录后，好友列表与传输记录将云端同步，换设备打开网页也能找回。
-    </p>
-  </div>
-</div>
 </body>
 </html>
