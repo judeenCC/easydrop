@@ -443,12 +443,13 @@ tailwind.config = {
         </p>
       </div>
 
-      <!-- 分段式标签栏：四等分，宽度固定居中 -->
+      <!-- 分段式标签栏：五等分，宽度固定居中；"聊天"页常驻承载所有活动的会话 -->
       <div class="mb-5 sm:mb-6">
-        <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-4 gap-1 w-full max-w-xl mx-auto">
+        <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-5 gap-1 w-full max-w-2xl mx-auto">
           <button onclick="onTabClick('friends')" data-tab="friends" class="seg-tab">好友列表</button>
           <button onclick="onTabClick('send')" data-tab="send" class="seg-tab">我要发送</button>
           <button onclick="onTabClick('receive')" data-tab="receive" class="seg-tab">我要接收</button>
+          <button onclick="onTabClick('chat')" data-tab="chat" class="seg-tab">聊天<span id="chatTabBadge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] leading-none">0</span></button>
           <button onclick="onTabClick('localsend')" data-tab="localsend" class="seg-tab">LocalSend</button>
         </div>
       </div>
@@ -608,41 +609,75 @@ tailwind.config = {
         </div>
       </div>
 
-      <div id="sendInterface" class="hidden page-panel">
-        <!-- 聊天窗口：顶部对方信息 / 中间消息流 / 底部输入区 -->
-        <div class="glass rounded-2xl p-4 mb-4 flex items-center justify-between gap-3">
+    </div>
+  </div>
+
+    <!-- Chat Mode：会话常驻页。同一时间可存在多个连接（顶部会话条切换），不影响其他标签页操作 -->
+    <div id="chatMode" class="hidden animate-fade-in">
+      <div class="page-panel">
+        <div id="sessionChips" class="hidden flex flex-wrap gap-2 mb-4"></div>
+
+        <!-- 拨号中横幅：等待对方确认/连接码注册期间显示，可随时取消 -->
+        <div id="chatDialBanner" class="hidden glass rounded-2xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
           <div class="flex items-center gap-3 min-w-0">
-            <div id="chatPeerAvatar" class="friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0">?</div>
-            <div class="min-w-0">
-              <p class="text-sm font-semibold text-slate-800 truncate" id="chatPeerName">对方设备</p>
-              <p class="text-xs text-slate-400" id="chatPeerStatus">已连接 · 点对点加密</p>
+            <div class="w-9 h-9 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
+              <div class="w-4 h-4 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
+            </div>
+            <p class="text-sm text-slate-600 truncate" id="chatDialText">正在连接对方...</p>
+          </div>
+          <button onclick="cancelDial()" class="px-3 py-1.5 rounded-lg glass hover:bg-red-50 hover:text-red-500 text-xs text-slate-600 flex-shrink-0">
+            <i class="fas fa-xmark mr-1"></i>取消
+          </button>
+        </div>
+
+        <!-- 聊天窗口：顶部对方信息 / 中间消息流 / 底部输入区 -->
+        <div id="sendInterface" class="hidden page-panel">
+          <div class="glass rounded-2xl p-4 mb-4 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div id="chatPeerAvatar" class="friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0">?</div>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-slate-800 truncate" id="chatPeerName">对方设备</p>
+                <p class="text-xs text-slate-400" id="chatPeerStatus">已连接 · 点对点加密</p>
+              </div>
+            </div>
+            <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600 flex-shrink-0">
+              <i class="fas fa-xmark mr-1"></i>
+              断开
+            </button>
+          </div>
+
+          <div id="chatMessages" class="glass-strong rounded-2xl p-4 mb-4 h-[46vh] min-h-[320px] overflow-y-auto flex flex-col gap-3">
+            <div id="chatEmptyHint" class="m-auto text-center text-slate-400 text-sm py-10">
+              <i class="fas fa-share-nodes text-3xl text-slate-300 block mb-3"></i>
+              连接已建立，拖入文件或发送消息开始传输
             </div>
           </div>
-          <button onclick="disconnect()" class="px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600 flex-shrink-0">
-            <i class="fas fa-xmark mr-1"></i>
-            断开
-          </button>
-        </div>
 
-        <div id="chatMessages" class="glass-strong rounded-2xl p-4 mb-4 h-[46vh] min-h-[320px] overflow-y-auto flex flex-col gap-3">
-          <div id="chatEmptyHint" class="m-auto text-center text-slate-400 text-sm py-10">
-            <i class="fas fa-share-nodes text-3xl text-slate-300 block mb-3"></i>
-            连接已建立，拖入文件或发送消息开始传输
+          <div class="glass rounded-2xl p-3 flex items-center gap-2">
+            <input type="file" id="fileInput" multiple class="hidden">
+            <button onclick="document.getElementById('fileInput').click()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
+              <i class="fas fa-plus text-slate-500"></i>
+            </button>
+            <button onclick="sendClipboard()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
+              <i class="fas fa-clipboard text-slate-500"></i>
+            </button>
+            <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700" onkeydown="if(event.key==='Enter')sendChatText()">
+            <button onclick="sendChatText()" class="px-5 h-11 rounded-xl btn-primary text-white text-sm font-medium flex-shrink-0">
+              <i class="fas fa-paper-plane mr-1"></i>发送
+            </button>
           </div>
         </div>
 
-        <div class="glass rounded-2xl p-3 flex items-center gap-2">
-          <input type="file" id="fileInput" multiple class="hidden">
-          <button onclick="document.getElementById('fileInput').click()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
-            <i class="fas fa-plus text-slate-500"></i>
-          </button>
-          <button onclick="sendClipboard()" class="w-11 h-11 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
-            <i class="fas fa-clipboard text-slate-500"></i>
-          </button>
-          <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700" onkeydown="if(event.key==='Enter')sendChatText()">
-          <button onclick="sendChatText()" class="px-5 h-11 rounded-xl btn-primary text-white text-sm font-medium flex-shrink-0">
-            <i class="fas fa-paper-plane mr-1"></i>发送
-          </button>
+        <div id="chatNoSessionState" class="hidden glass-strong rounded-3xl p-6 sm:p-12 text-center">
+          <div class="w-20 h-20 mx-auto mb-4 rounded-2xl bg-primary-500/10 flex items-center justify-center">
+            <i class="fas fa-comments text-3xl text-primary-500"></i>
+          </div>
+          <h3 class="text-xl font-semibold mb-2 text-slate-700">还没有活动连接</h3>
+          <p class="text-slate-400 text-sm mb-6">从好友列表发起连接，或用连接码 / LocalSend 建立连接后，会话会出现在这里</p>
+          <div class="flex flex-wrap justify-center gap-3">
+            <button onclick="onTabClick('friends')" class="px-6 py-3 rounded-xl btn-primary text-white font-medium whitespace-nowrap">去好友列表连接</button>
+            <button onclick="onTabClick('localsend')" class="px-6 py-3 rounded-xl glass text-slate-700 font-medium whitespace-nowrap">LocalSend 快速直连</button>
+          </div>
         </div>
       </div>
     </div>
@@ -757,8 +792,6 @@ tailwind.config = {
           <p id="localsendNetStatus" class="text-xs text-slate-400 mt-2">局域网发现：启动中...</p>
         </div>
 
-        <div id="localsendSession" class="hidden mb-6"></div>
-
         <div id="localsendDeviceList" class="space-y-3"></div>
 
         <div id="localsendEmptyHint" class="hidden glass rounded-2xl p-6 text-center text-sm text-slate-400 mb-4">
@@ -865,43 +898,38 @@ tailwind.config = {
 
 <script>
 // ==================== Global State ====================
-let peer = null;
-let dataChannel = null;
-let connected = false;
-let isInitiator = false;
+// 双 Peer 架构：devicePeer 常驻（收好友直连、发直连/连接码拨号），
+// codePeer 仅在生成 6 位连接码后临时存在（等待接收方拨入），互不干扰 ——
+// 这样连接码等待期间仍可接受/发起新连接，支持多会话并行
+let devicePeer = null;
+let codePeer = null;
 let currentTab = 'friends';
-let fileQueue = [];
-let receivedFiles = [];
-let transferStats = { sent: 0, received: 0 };
-let sessionCode = null;
+let friends = [];
+
+// 多会话（同一时间可并行多条 P2P 连接）：
+// key 为底层 conn.peer（全局唯一），值见 createSession()
+const sessions = new Map();
+let activeSessionKey = null;     // 当前聊天窗口显示的会话
+let sessionCode = null;           // 6 位连接码（发送方生成 / 接收方输入）
 let codeTimer = null;
 let codeExpiry = 300;
 let codeRetry = 0;
 let stableIdRetry = 0;
 let currentFriendId = null;
-let friends = [];
 
 // 设备身份（持久化）：4 位识别码 + 昵称，用于好友识别、直连与 LocalSend 发现
 let myDeviceId = '';             // 4 位识别码（数字+大写字母），同时是 PeerJS 注册 ID 与连接地址参数
 let myDeviceName = '我的设备';    // 昵称（形容词+水果），对方看到的显示名，可在设置中修改
-let remoteIdentity = null;
 
-// 拨号状态
+// 拨号状态（同一时刻最多一条"正在拨出"的线路；入站连接可同时多条排队确认）
 let dialingFriend = null;
 let dialingCode = false;
 let dialTimeout = null;
 let dialActive = false;          // 是否有进行中的拨号（随时可取消）
 let dialSeq = 0;                 // 拨号序号：取消或重新拨号后，旧的异步流程自动作废
 let pendingDialConn = null;      // 进行中的拨号连接，取消时关闭
-let dialFrom = null;             // 拨号来源：'localsend' 时结果留在 LocalSend 页面
+let dialFrom = null;             // 拨号来源：'localsend' 时显示行内转圈
 let localsendDialTarget = null;  // LocalSend 中正在拨号的设备 ID（用于行内转圈）
-
-// 传输状态（同一时间只允许一个文件在传，避免数据交叉损坏）
-let currentTransfer = null;      // 正在发送的文件项
-let currentReceive = null;       // 正在接收的文件项
-let receivedChunks = [];
-let receivedBytes = 0;
-const textAssembly = {};         // 长文本分片重组缓冲
 
 // ==================== Protocol Constants ====================
 const PEER_PREFIX_DEV = 'easydrop-dev-';     // 稳定设备 ID 前缀（好友直连用）
@@ -957,13 +985,13 @@ function toU8(data) {
 
 // 获取 PeerJS 连接底层的原生 RTCDataChannel（用于真实背压控制）
 // 获取底层发送缓冲字节数（peerjs 1.5.x 提供 bufferSize 公开 getter，
-// 兜底再探测原始 RTCDataChannel）
-function getBufferedAmount() {
-  if (!dataChannel) return 0;
+// 兜底再探测原始 RTCDataChannel）；多会话后按传入连接区分
+function connBufferedAmount(conn) {
+  if (!conn) return 0;
   try {
-    if (typeof dataChannel.bufferSize === 'number') return dataChannel.bufferSize;
+    if (typeof conn.bufferSize === 'number') return conn.bufferSize;
   } catch (e) { /* noop */ }
-  const dc = dataChannel.dataChannel || dataChannel._channel || dataChannel._dc;
+  const dc = conn.dataChannel || conn._channel || conn._dc;
   if (dc && typeof dc.bufferedAmount === 'number') return dc.bufferedAmount;
   return 0;
 }
@@ -1024,12 +1052,15 @@ function ensureIdentity() {
 }
 
 // ==================== ICE Servers ====================
+// Cloudflare STUN 排最前：Google STUN 在国内常被阻断，拿不到 srflx 候选会导致
+// 双方只用 mDNS 主机候选、跨网/部分路由器环境 ICE 全部失败 → 表现为拨号永远转圈
 function getIceServers() {
   const servers = [];
   try {
     const customStun = (localStorage.getItem('easydrop_stun') || '').trim();
     if (customStun) servers.push({ urls: customStun });
   } catch (e) { /* ignore */ }
+  servers.push({ urls: 'stun:stun.cloudflare.com:3478' });
   servers.push({ urls: 'stun:stun.l.google.com:19302' });
   servers.push({ urls: 'stun:stun1.l.google.com:19302' });
   // TURN 中继兜底：双方处于严格 NAT / 跨运营商网络导致直连失败时仍可建立连接
@@ -1105,9 +1136,9 @@ function updateFriendTransferStats(friendId) {
   }
 }
 
-function updateFriendTransferByRemote() {
-  if (!remoteIdentity) return;
-  const f = friends.find(fr => fr.deviceId === remoteIdentity.deviceId);
+function updateFriendTransferByRemote(s) {
+  if (!s || !s.identity) return;
+  const f = friends.find(fr => fr.deviceId === s.identity.deviceId);
   if (f) updateFriendTransferStats(f.id);
 }
 
@@ -1178,15 +1209,16 @@ function renderFriendsList() {
   updateFriendOnlineIndicators();
 }
 
-// 在线状态：局域网信标可见的好友 = 在线（纸飞机蓝色可点），否则灰色
+// 在线状态：局域网信标或全局信标可见 = 在线（纸飞机蓝色可点），否则灰色
 function isFriendOnline(friend) {
-  return !!(friend.deviceId && lanPeers.has(friend.deviceId));
+  if (!friend.deviceId) return false;
+  return !!(lanPeers.has(friend.deviceId) || presencePeersLive().has(friend.deviceId));
 }
 
 function updateFriendOnlineIndicators() {
   document.querySelectorAll('[data-friend-plane]').forEach(btn => {
     const id = btn.getAttribute('data-friend-plane');
-    const online = !!(id && lanPeers.has(id));
+    const online = !!(id && (lanPeers.has(id) || presencePeersLive().has(id)));
     btn.classList.toggle('bg-primary-500', online);
     btn.classList.toggle('hover:bg-primary-600', online);
     btn.classList.toggle('shadow-md', online);
@@ -1196,8 +1228,8 @@ function updateFriendOnlineIndicators() {
       icon.classList.toggle('text-white', online);
       icon.classList.toggle('text-slate-400', !online);
     }
-    // 灰色仅代表局域网未发现（跨网络好友可能仍在线），点击仍会尝试直连
-    btn.title = online ? '对方在线，点击直接发起传输' : '局域网内未发现对方，点击仍会尝试连接';
+    // 灰色仅代表信标未发现（可能因对方域总线未连通），点击仍会尝试直连
+    btn.title = online ? '对方在线，点击直接发起传输' : '未检测到对方在线，点击仍会尝试连接';
   });
 }
 
@@ -1325,28 +1357,37 @@ function closeFriendModal() {
   currentFriendId = null;
   // 弹窗被 overlay 点击/Esc 关闭时，视为拒绝未处理的连接请求
   if (pendingIncomingConn) {
-    try { pendingIncomingConn.close(); } catch (e) { /* noop */ }
+    const conn = pendingIncomingConn;
     pendingIncomingConn = null;
+    try { conn.close(); } catch (e) { /* noop */ }
     showToast('已拒绝对方的连接请求', 'info');
   }
+  showNextIncomingConfirm(); // 队列中还有请求就继续展示下一个
 }
 
-// 一键直连好友：直接拨对方稳定的设备 ID，无需再交换 6 位码
+// 一键直连好友：直接拨对方稳定的设备 ID，无需再交换 6 位码。
+// 已建立会话则直接切换；多会话下可同时连多个好友。
 async function connectToFriend(friendId, from = null) {
   const friend = friends.find(f => f.id === friendId);
   if (!friend) return;
 
   closeFriendModal();
 
-  if (connected || dataChannel || pendingIncomingConn) {
-    showToast('已有连接在处理，请先完成或断开', 'warning');
+  const existingSession = findSessionByDeviceId(friend.deviceId);
+  if (existingSession) {
+    setActiveSession(existingSession.key);
+    switchTab('chat');
+    return;
+  }
+  if (dialActive || dialingFriend || dialingCode) {
+    showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
   if (!friend.deviceId) {
     showToast('该好友缺少设备标识，无法直连，请通过新的连接码重新添加', 'warning');
     return;
   }
-  if (!peer) {
+  if (!devicePeer) {
     showToast('信令连接未就绪，请稍后重试', 'error');
     return;
   }
@@ -1355,47 +1396,39 @@ async function connectToFriend(friendId, from = null) {
   const seq = ++dialSeq;
   dialActive = true;
   dialFrom = from;
-  if (from === 'localsend') { localsendDialTarget = friend.deviceId; renderLocalsendList(); }
-  if (!peer.open) {
+  if (from === 'localsend') {
+    localsendDialTarget = friend.deviceId;
+    renderLocalsendList();
+  } else {
+    switchTab('chat');
+    showDialBanner(`正在连接 ${esc(friend.name)}...等待对方确认`);
+  }
+  if (!devicePeer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
     if (seq !== dialSeq) return;
     if (!ok) {
       endDial();
+      hideDialBanner();
       showToast('连接服务未就绪，请稍后重试', 'error');
       return;
     }
-    if (connected || dataChannel) {
-      endDial();
-      showToast('已有活动连接，请先断开后再发起新连接', 'warning');
-      return;
-    }
   }
 
-  isInitiator = true;
   dialingFriend = friend;
-  if (from !== 'localsend') {
-    switchTab('send');
-    // 注意：connectingState 在 sendSetup 内部，只能隐藏兄弟步骤，不能隐藏 sendSetup 本身
-    hide('generateCodeStep');
-    hide('shareCodeStep');
-    hide('sendInterface');
-    show('sendSetup');
-    show('connectingState');
-    const t = document.getElementById('connectingText');
-    if (t) t.textContent = `正在连接 ${friend.name}...`;
-  }
-
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial(`连接 ${friend.name} 超时，对方可能不在线`), 20000);
 
-  const conn = peer.connect(PEER_PREFIX_DEV + friend.deviceId, { reliable: true });
+  const conn = devicePeer.connect(PEER_PREFIX_DEV + friend.deviceId, {
+    reliable: true,
+    metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
+  });
   pendingDialConn = conn;
   conn.on('open', () => {
     if (dialingFriend !== friend) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingFriend = null;
     clearDialTimeout();
-    setupConnection(conn);
+    createSession(conn, { isInitiator: true, userConfirm: true, autoAddNext: false });
   });
   conn.on('error', (err) => {
     console.error('好友直连出错:', err);
@@ -1437,7 +1470,8 @@ function addHistoryEntry(entry) {
 }
 
 function currentPeerName() {
-  return remoteIdentity ? remoteIdentity.deviceName : '对方设备';
+  const s = getActiveSession();
+  return s ? sessionDisplayName(s) : '对方设备';
 }
 
 function renderHistory() {
@@ -1489,9 +1523,8 @@ function clearHistory() {
 // 浏览器无法按裸 IP 直连（网页不能监听端口、WebRTC 需信令先交换），故以
 // 「页面链接+设备ID」作为设备的可复制地址；拨入陌生设备时本端弹确认把关
 const CONNECT_PARAM = 'connect';
-let pendingIncomingConn = null; // 等待本端确认的入站连接
-let autoAddNextFriend = false;  // A 端点了"接受并加好友"后，hello 时自动添加
-let dialPurpose = 'connect';    // B 端发起目的：'connect' | 'add-friend'
+let pendingIncomingConn = null; // 正在弹窗确认的入站连接
+const pendingIncomingQueue = []; // 排队中的陌生设备入站连接（一次确认一个，多个不互斥）
 
 function buildDeviceAddress(deviceId) {
   return location.origin + location.pathname + '?' + CONNECT_PARAM + '=' + (deviceId || myDeviceId);
@@ -1782,6 +1815,96 @@ function lanPeersLive() {
   return Array.from(lanPeers.values());
 }
 
+// ==================== 全局在线信标（跨网络 presence） ====================
+// 局域网信标只能发现同网段设备；跨网络好友"明明在线却灰色"。
+// 这里复用 Pages 同域的 WS 信标总线（app 能打开就一定连得上自己域名），
+// 所有设备都向 GLOBAL 房间广播心跳，好友纸飞机的在线判定与之打通。
+const PRESENCE_TOPIC = 'easydrop-presence/v1/global';
+const PRESENCE_WS_BASE = 'wss://easydrop-ady.pages.dev';
+const presencePeers = new Map();   // deviceId -> { id, name, ts }
+let presenceWs = null;
+let presenceTimer = null;
+let presenceRetryCount = 0;
+let presenceRetryTimer = null;
+
+function presenceWsUrl() {
+  const base = (location.protocol === 'https:' && location.hostname.endsWith('.pages.dev'))
+    ? location.origin.replace(/^http/, 'ws')
+    : PRESENCE_WS_BASE;
+  return base.replace(/\/$/, '') + '/' + PRESENCE_TOPIC;
+}
+
+function initPresenceBeacon() {
+  if (presenceWs && (presenceWs.readyState === WebSocket.OPEN || presenceWs.readyState === WebSocket.CONNECTING)) return;
+  let ws;
+  try {
+    ws = new WebSocket(presenceWsUrl());
+  } catch (e) {
+    schedulePresenceRetry();
+    return;
+  }
+  presenceWs = ws;
+  const guard = setTimeout(() => {
+    if (presenceWs === ws && ws.readyState === WebSocket.CONNECTING) {
+      try { ws.close(); } catch (e) { /* noop */ }
+    }
+  }, 8000);
+  ws.onopen = () => {
+    clearTimeout(guard);
+    presenceRetryCount = 0;
+    publishPresence();
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTimer = setInterval(publishPresence, LAN_BEACON_INTERVAL);
+    updateFriendOnlineIndicators();
+  };
+  ws.onmessage = ev => handlePresencePayload(String(ev.data));
+  ws.onclose = () => {
+    if (presenceWs !== ws) return; // 已被新连接取代
+    presenceWs = null;
+    if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+    schedulePresenceRetry();
+  };
+  ws.onerror = () => { /* close 会跟随触发 */ };
+}
+
+function handlePresencePayload(text) {
+  try {
+    const msg = JSON.parse(text);
+    const id = safeId(msg.id);
+    if (!id || id === myDeviceId) return;
+    if (String(msg.t || 0) < Date.now() - LAN_PEER_TTL) {
+      presencePeers.delete(id);
+      updateFriendOnlineIndicators();
+      return;
+    }
+    presencePeers.set(id, { id: id, name: (typeof msg.name === 'string' ? msg.name : '').slice(0, 40), t: Date.now() });
+    updateFriendOnlineIndicators();
+  } catch (e) { /* 忽略畸形信标 */ }
+}
+
+function publishPresence() {
+  const payload = JSON.stringify({ id: myDeviceId, name: myDeviceName, t: Date.now() });
+  if (presenceWs && presenceWs.readyState === WebSocket.OPEN) {
+    try { presenceWs.send(payload); } catch (e) { /* noop */ }
+  }
+}
+
+function presencePeersLive() {
+  const now = Date.now();
+  presencePeers.forEach((p, id) => { if (now - p.t > LAN_PEER_TTL) presencePeers.delete(id); });
+  return presencePeers;
+}
+
+function schedulePresenceRetry() {
+  presenceRetryCount++;
+  if (presenceRetryCount > 6) return; // 总线偶发不可达时静默放弃轮询，不影响传输主流程
+  if (presenceRetryTimer) return;
+  presenceRetryTimer = setTimeout(() => {
+    presenceRetryTimer = null;
+    initPresenceBeacon();
+  }, 4000);
+}
+
 function renderLocalsendList() {
   const list = document.getElementById('localsendDeviceList');
   const hint = document.getElementById('localsendEmptyHint');
@@ -1857,6 +1980,7 @@ function openLocalSend() {
   switchTab('localsend');
 }
 
+// 取"添加好友"目的拨号：连接成功后 hello 自动添加（否则弹添加确认）
 async function dialByAddress(purpose, inputId, from = null) {
   const input = document.getElementById(inputId || 'peerUidInput');
   const targetId = parseDeviceAddress(input ? input.value : '');
@@ -1874,61 +1998,57 @@ async function dialByAddress(purpose, inputId, from = null) {
     connectToFriend(existing.id, from);
     return;
   }
-  dialPurpose = purpose;
-  await dialDevice(targetId, from);
+  await dialDevice(targetId, from, purpose);
 }
 
-// 按稳定设备 ID 拨号；对方是陌生设备时会先弹确认，同意才真正握手
-async function dialDevice(deviceId, from = null) {
-  if (connected || dataChannel || pendingIncomingConn) {
-    showToast('已有连接在处理，请先断开或完成后再发起', 'warning');
+// 按稳定设备 ID 拨号；对方是陌生设备时会先弹确认，同意才真正握手。
+// 多会话下可与已有连接并存；对同一设备重复点击会话已存在时直接切到聊天。
+async function dialDevice(deviceId, from = null, purpose = 'connect') {
+  const existingSession = findSessionByDeviceId(deviceId);
+  if (existingSession) {
+    setActiveSession(existingSession.key);
+    switchTab('chat');
+    showToast('与该设备的连接已存在，已切换到聊天', 'info');
     return;
   }
-  if (!peer) {
+  const busy = dialActive || dialingFriend || dialingCode;
+  if (busy) {
+    showToast('有连接请求正在处理，请先取消', 'warning');
+    return;
+  }
+  if (!devicePeer) {
     showToast('信令连接未就绪，请稍后重试', 'error');
     return;
   }
   const seq = ++dialSeq;
   dialActive = true;
   dialFrom = from;
-  if (from === 'localsend') { localsendDialTarget = deviceId; renderLocalsendList(); }
-  if (!peer.open) {
+  if (from === 'localsend') {
+    localsendDialTarget = deviceId;
+    renderLocalsendList();
+  } else {
+    switchTab('chat');
+    showDialBanner('正在请求连接对方设备，等待对方确认...');
+  }
+  if (!devicePeer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
     if (seq !== dialSeq) return;
     if (!ok) {
       endDial();
+      hideDialBanner();
       showToast('连接服务未就绪，请稍后重试', 'error');
-      return;
-    }
-    if (connected || dataChannel) {
-      endDial();
-      showToast('已有活动连接，请先断开', 'warning');
       return;
     }
   }
 
-  isInitiator = true;
   dialingFriend = { name: '对方设备', deviceId: deviceId }; // 复用拨号超时与错误处理
-  if (from !== 'localsend') {
-    switchTab('send');
-    // 注意：connectingState 在 sendSetup 内部，只能隐藏兄弟步骤，不能隐藏 sendSetup 本身
-    hide('generateCodeStep');
-    hide('shareCodeStep');
-    hide('sendInterface');
-    show('sendSetup');
-    show('connectingState');
-    const t = document.getElementById('connectingText');
-    if (t) t.textContent = '正在请求连接对方设备，等待对方确认...';
-  } else {
-    showToast('已发送连接请求，等待对方确认；再次点击转圈图标可取消', 'info');
-  }
 
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial('对方未响应（可能不在线或拒绝了请求）'), 25000);
 
   // metadata 随信令送达，供对方在确认弹窗里看到本机名称（对端不可信，展示时转义）
-  const conn = peer.connect(PEER_PREFIX_DEV + deviceId, {
+  const conn = devicePeer.connect(PEER_PREFIX_DEV + deviceId, {
     reliable: true,
     metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
   });
@@ -1937,7 +2057,7 @@ async function dialDevice(deviceId, from = null) {
     if (!dialingFriend || dialingFriend.deviceId !== deviceId) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingFriend = null;
     clearDialTimeout();
-    setupConnection(conn);
+    createSession(conn, { isInitiator: true, userConfirm: true, autoAddNext: false, dialPurpose: purpose });
   });
   conn.on('close', () => {
     if (dialingFriend && dialingFriend.deviceId === deviceId) failFriendDial('对方拒绝了连接请求');
@@ -1996,52 +2116,47 @@ function showIncomingRequestModal(opts) {
 }
 
 // ==================== Tab Switching（分段式标签页版） ====================
-// 主页为常驻分段标签：点击切换下方内容区；连接/拨号中禁止切换，防止离开传输界面
+// 主页为常驻分段标签。多会话后切换标签不再受连接影响：聊天窗口常驻"聊天"标签，
+// 后台会话照常传输；拨号中切标签会自动取消当前拨号请求。
 function switchTab(tab) {
   currentTab = tab;
   activateMode(tab);
   document.querySelectorAll('#mainTabs .seg-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
+  if (tab === 'localsend') renderLocalsendList();
+  if (tab === 'chat') {
+    const s = getActiveSession();
+    if (s) s.unread = 0;
+    renderChat(true);
+    updateChatTabBadge();
+  }
 }
 
-// 标签点击（带守卫）；内部流程（连接建立、断开复位）直接调 switchTab 不经守卫
 function onTabClick(tab) {
-  if (tab !== currentTab && (connected || dataChannel)) {
-    showToast('请先断开连接后再切换', 'warning');
-    return;
-  }
   // 拨号中切换标签：自动取消当前拨号，不再把用户锁在等待页面
   if (tab !== currentTab && (dialActive || dialingFriend || dialingCode)) {
     cancelDial();
   }
-  if (tab === 'localsend') renderLocalsendList();
   switchTab(tab);
+  if (tab === 'chat') renderChat(true);
 }
 
 function openHistory() {
-  if (connected || dataChannel) {
-    showToast('请先断开连接后再查看', 'warning');
-    return;
-  }
   renderHistory();
   switchTab('history');
 }
 
 function activateMode(tab) {
-  ['friends', 'send', 'receive', 'history', 'localsend'].forEach(t => {
+  ['friends', 'send', 'receive', 'chat', 'history', 'localsend'].forEach(t => {
     const mode = document.getElementById(t + 'Mode');
     if (mode) mode.classList.toggle('hidden', t !== tab);
   });
 }
 
 function goHome() {
-  if (connected || dataChannel) {
-    showToast('请先断开连接后再返回主页', 'warning');
-    return;
-  }
   if (dialActive || dialingFriend || dialingCode) cancelDial();
-  switchTab('home');
+  switchTab('friends');
 }
 
 // 聊天窗口：消息流统一渲染（文件+文本，发送靠右/接收靠左）
@@ -2064,8 +2179,10 @@ function startCodeTimer() {
     if (codeExpiry <= 0) {
       clearInterval(codeTimer);
       codeTimer = null;
-      showToast('连接码已过期，请重新生成', 'warning');
-      resetConnection();
+      if (sessions.size === 0) {
+        showToast('连接码已过期，请重新生成', 'warning');
+        closeCodeSession();
+      }
     }
   }, 1000);
 }
@@ -2090,53 +2207,10 @@ function createPeer(peerId, kind) {
     console.log('PeerJS 已就绪 (' + kind + '):', id);
     // 设备 ID 注册成功即复位失败计数，否则累计 3 次后会永久降级为临时 ID
     if (kind === 'device') stableIdRetry = 0;
-    updateConnectionStatus(connected);
+    updateConnectionStatus();
   });
 
-  p.on('connection', (conn) => {
-    if (connected || dataChannel || dialingFriend || dialingCode || pendingIncomingConn) {
-      try { conn.close(); } catch (e) { /* noop */ }
-      showToast('已有连接正在处理，已拒绝新的连接请求', 'warning');
-      return;
-    }
-    // 连接码 peer 的入站连接 = 接收方主动拨入，本端保持发送方，无需确认
-    if (kind === 'code') {
-      isInitiator = true;
-      setupConnection(conn);
-      return;
-    }
-    // 设备 peer 的入站连接：好友直连直接接受；陌生设备（地址互连）弹确认把关
-    isInitiator = false;
-    const peerId = String(conn.peer || '');
-    const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
-    const known = callerId && friends.find(f => f.deviceId === callerId);
-    if (known) {
-      setupConnection(conn);
-      return;
-    }
-    pendingIncomingConn = conn;
-    const discardIfGone = () => {
-      if (pendingIncomingConn !== conn) return;
-      pendingIncomingConn = null;
-      closeFriendModal(); // 内部会把无 pending 的情况安全跳过
-      showToast('对方的请求已取消', 'info');
-    };
-    conn.on('close', discardIfGone);
-    conn.on('error', discardIfGone);
-    const meta = conn.metadata || {};
-    showIncomingRequestModal({
-      callerId,
-      name: typeof meta.deviceName === 'string' ? meta.deviceName : '',
-      onAccept: (asFriend) => {
-        autoAddNextFriend = asFriend;
-        setupConnection(conn);
-      },
-      onReject: () => {
-        try { conn.close(); } catch (e) { /* noop */ }
-        showToast('已拒绝对方的连接请求', 'info');
-      }
-    });
-  });
+  p.on('connection', (conn) => handleIncomingConnection(conn, kind));
 
   // 信令服务器断线时自动重连（不影响已建立的 P2P 传输）
   p.on('disconnected', () => {
@@ -2149,13 +2223,94 @@ function createPeer(peerId, kind) {
   return p;
 }
 
-// 稳定设备 Peer：用于接收好友直连
-function initializePeer() {
-  if (peer) {
-    try { peer.destroy(); } catch (e) { /* noop */ }
-    peer = null;
+// 入站连接处理：一律不再因"已有连接"而拒绝（支持多会话并行）。
+// 连接码 peer 的入站 = 接收方拨入，本端是发送方，直接建会话；
+// 设备 peer 的入站：好友自动接受；陌生设备弹确认，多个请求依次排队。
+function handleIncomingConnection(conn, kind) {
+  if (sessions.has(conn.peer)) {
+    // 同一 peerId 的重复连接（旧连接复用 ID），拒绝一条避免串流
+    try { conn.close(); } catch (e) { /* noop */ }
+    return;
   }
-  peer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
+  if (kind === 'code') {
+    startCodeSessionWithConn(conn);
+    return;
+  }
+  const peerId = String(conn.peer || '');
+  const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+  const known = callerId && friends.find(f => f.deviceId === callerId);
+  if (known) {
+    acceptIncomingSession(conn, false);
+    return;
+  }
+  // 陌生设备：入确认队列（一次只弹一个窗，其余等待）
+  pendingIncomingQueue.push(conn);
+  const discardIfGone = () => {
+    const i = pendingIncomingQueue.indexOf(conn);
+    if (i >= 0) {
+      pendingIncomingQueue.splice(i, 1);
+      showToast('对方的请求已取消', 'info');
+    }
+    if (pendingIncomingConn === conn) {
+      pendingIncomingConn = null;
+      closeFriendModal(); // 内部会把无 pending 的情况安全跳过
+      showNextIncomingConfirm();
+    }
+  };
+  conn.on('close', discardIfGone);
+  conn.on('error', discardIfGone);
+  showNextIncomingConfirm();
+}
+
+// 逐个展示排队中的连接确认弹窗
+function showNextIncomingConfirm() {
+  if (pendingIncomingConn) return; // 已有一个正在确认中
+  const conn = pendingIncomingQueue[0];
+  if (!conn) return;
+  pendingIncomingQueue.shift();
+  if (conn.disconnected) {
+    // 对方已取消（close/error 处理器通常已清理，这里兜底跳过）
+    showNextIncomingConfirm();
+    return;
+  }
+  pendingIncomingConn = conn;
+  const peerId = String(conn.peer || '');
+  const callerId = peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+  const meta = conn.metadata || {};
+  showIncomingRequestModal({
+    callerId,
+    name: typeof meta.deviceName === 'string' ? meta.deviceName : '',
+    onAccept: (asFriend) => {
+      pendingIncomingConn = null;
+      closeFriendModal();
+      acceptIncomingSession(conn, asFriend);
+      showNextIncomingConfirm();
+    },
+    onReject: () => {
+      pendingIncomingConn = null;
+      try { conn.close(); } catch (e) { /* noop */ }
+      showToast('已拒绝对方的连接请求', 'info');
+      showNextIncomingConfirm();
+    }
+  });
+}
+
+// 接受入站连接并建立会话；known=false 时 hello 后视选择自动加好友
+function acceptIncomingSession(conn, autoAddFriend) {
+  createSession(conn, {
+    isInitiator: false,
+    autoAddNext: !!autoAddFriend,
+    userConfirm: !!autoAddFriend // 只有明确点过"接受并加好友"才弹添加确认，直连好友静默
+  });
+}
+
+// 稳定设备 Peer：用于接收好友直连 / 发起直连与连接码拨号
+function initializePeer() {
+  if (devicePeer) {
+    try { devicePeer.destroy(); } catch (e) { /* noop */ }
+    devicePeer = null;
+  }
+  devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
 }
 
 function handlePeerError(err, kind, p) {
@@ -2177,21 +2332,23 @@ function handlePeerError(err, kind, p) {
           codeRetry++;
           showToast('连接码冲突，已自动更换新码', 'info');
           sessionCode = generate6DigitCode();
+          document.getElementById('codeDisplay').textContent = sessionCode;
           createCodePeer();
         } else {
           showToast('连接码注册失败，请稍后重试', 'error');
-          resetConnection();
+          closeCodeSession();
+          switchTab('send');
         }
-      } else if (kind === 'device' && peer === p) {
+      } else if (kind === 'device' && devicePeer === p) {
         // 识别码注册冲突：可能是旧连接释放延迟，先退避重试；仍冲突则换新码并持久化
         stableIdRetry = (stableIdRetry || 0) + 1;
         if (stableIdRetry <= 3) {
           const delay = stableIdRetry * 1000;
           console.warn('识别码注册失败，' + delay + 'ms 后重试 (' + stableIdRetry + '/3)');
           setTimeout(() => {
-            if (peer !== p) return;
+            if (devicePeer !== p) return;
             try { p.destroy(); } catch (e) { /* noop */ }
-            peer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
+            devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
           }, delay);
         } else {
           stableIdRetry = 0;
@@ -2202,13 +2359,9 @@ function handlePeerError(err, kind, p) {
           renderDeviceAddress();
           renderIdentityCard();
           try { p.destroy(); } catch (e) { /* noop */ }
-          peer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
+          devicePeer = createPeer(PEER_PREFIX_DEV + myDeviceId, 'device');
           showToast('识别码与其他设备冲突，已自动分配新码 ' + myDeviceId, 'warning');
         }
-      } else if (peer === p) {
-        // 其他 peer（如随机 ID）出现 unavailable-id：重建一个随机 ID
-        try { p.destroy(); } catch (e) { /* noop */ }
-        peer = createPeer(undefined, 'device-random');
       }
       break;
     case 'network':
@@ -2228,19 +2381,16 @@ function handlePeerError(err, kind, p) {
 // ==================== Sender: Create Connection ====================
 // 发送方取消等待中的连接码：销毁连接码 peer、停止倒计时，回到生成前的界面
 function cancelShareCode() {
-  if (connected || dataChannel) return;
-  resetConnection();
+  closeCodeSession();
   switchTab('send');
   showToast('已取消连接码', 'info');
 }
 
 function generateOffer() {
-  if (connected || dataChannel || pendingIncomingConn) {
-    showToast('已有连接在处理，请先完成或断开', 'warning');
-    return;
+  // 有已建立的码会话等待时先取消旧的，重新生成
+  if (codePeer && !sessions.size) {
+    closeCodeSession();
   }
-
-  isInitiator = true;
   hide('generateCodeStep');
   show('connectingState');
   const t = document.getElementById('connectingText');
@@ -2252,12 +2402,13 @@ function generateOffer() {
 }
 
 function createCodePeer() {
-  if (peer) {
-    try { peer.destroy(); } catch (e) { /* noop */ }
+  if (codePeer) {
+    try { codePeer.destroy(); } catch (e) { /* noop */ }
+    codePeer = null;
   }
-  peer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
+  codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
 
-  peer.on('open', () => {
+  codePeer.on('open', () => {
     const cd = document.getElementById('codeDisplay');
     if (cd) cd.textContent = sessionCode;
     hide('connectingState');
@@ -2267,12 +2418,28 @@ function createCodePeer() {
   });
 }
 
+// 连接码会话结束（断开/过期/取消）：销毁 codePeer 并复位连接码界面。
+// 多会话后这里不再动其他活动会话。
+function closeCodeSession() {
+  if (codeTimer) { clearInterval(codeTimer); codeTimer = null; }
+  sessionCode = null;
+  if (codePeer) {
+    try { codePeer.destroy(); } catch (e) { /* noop */ }
+    codePeer = null;
+  }
+  show('generateCodeStep');
+  hide('shareCodeStep');
+  hide('connectingState');
+  const codeDisplay = document.getElementById('codeDisplay');
+  if (codeDisplay) codeDisplay.textContent = '------';
+}
+
 // ==================== Receiver: Enter Connection Code ====================
 // 等待信令 peer 就绪（断开后立刻重拨时 peer 可能尚未 open，
 // 此时 connect 的 offer 会被静默丢弃）
 function ensurePeerOpen(timeoutMs) {
   timeoutMs = timeoutMs || 10000;
-  if (peer && peer.open) return Promise.resolve(true);
+  if (devicePeer && devicePeer.open) return Promise.resolve(true);
   return new Promise((resolve) => {
     let finished = false;
     const finish = (ok) => {
@@ -2282,9 +2449,9 @@ function ensurePeerOpen(timeoutMs) {
       resolve(ok);
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
-    if (peer) {
-      peer.on('open', () => finish(true));
-      peer.on('error', () => finish(false));
+    if (devicePeer) {
+      devicePeer.on('open', () => finish(true));
+      devicePeer.on('error', () => finish(false));
     } else {
       finish(false);
     }
@@ -2304,11 +2471,11 @@ async function generateAnswer() {
     showToast('请输入6位数字连接码', 'warning');
     return;
   }
-  if (connected || dataChannel || pendingIncomingConn) {
-    showToast('已有连接在处理，请先完成或断开', 'warning');
+  if (dialActive || dialingFriend || dialingCode) {
+    showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
-  if (!peer) {
+  if (!devicePeer) {
     showToast('正在连接服务，请稍后重试', 'error');
     return;
   }
@@ -2316,7 +2483,7 @@ async function generateAnswer() {
   // 先进入可取消的拨号状态，再等待信令服务就绪
   const seq = ++dialSeq;
   dialActive = true;
-  if (!peer.open) {
+  if (!devicePeer.open) {
     showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
     if (seq !== dialSeq) return;
@@ -2325,33 +2492,23 @@ async function generateAnswer() {
       showToast('连接服务未就绪，请稍后重试', 'error');
       return;
     }
-    // 等待期间状态可能已变化，重新校验
-    if (connected || dataChannel) {
-      endDial();
-      showToast('已有活动连接，请先断开', 'warning');
-      return;
-    }
   }
 
-  isInitiator = false;
   sessionCode = inputCode;
   dialingCode = true;
-
-  hide('receiveSetup');
-  show('receiveConnecting');
-  const rt = document.getElementById('receiveConnectingText');
-  if (rt) rt.textContent = '正在连接发送方...';
+  switchTab('chat');
+  showDialBanner('正在连接发送方...');
 
   clearDialTimeout();
   dialTimeout = setTimeout(() => failCodeDial('连接超时，请确认连接码是否正确'), 25000);
 
-  const conn = peer.connect(PEER_PREFIX_CODE + inputCode, { reliable: true });
+  const conn = devicePeer.connect(PEER_PREFIX_CODE + inputCode, { reliable: true });
   pendingDialConn = conn;
   conn.on('open', () => {
     if (!dialingCode) { try { conn.close(); } catch (e) { /* noop */ } return; }
     dialingCode = false;
     clearDialTimeout();
-    setupConnection(conn);
+    createSession(conn, { isInitiator: false, userConfirm: true });
   });
   conn.on('error', (err) => {
     console.error('连接发送方失败:', err);
@@ -2371,25 +2528,16 @@ function failCodeDial(msg) {
   dialingCode = false;
   endDial();
   clearDialTimeout();
-  isInitiator = false;
-  hide('receiveConnecting');
-  show('receiveSetup');
+  hideDialBanner();
   showToast(msg, 'error');
 }
 
 function failFriendDial(msg) {
   if (!dialingFriend) return;
-  const fromLocal = dialFrom === 'localsend';
   dialingFriend = null;
   endDial();
   clearDialTimeout();
-  isInitiator = false;
-  if (!fromLocal) {
-    hide('connectingState');
-    hide('sendInterface');
-    show('sendSetup');
-    show('generateCodeStep');
-  }
+  hideDialBanner();
   showToast(msg, 'error');
 }
 
@@ -2403,7 +2551,7 @@ function endDial() {
   if (wasLocal) renderLocalsendList();
 }
 
-// 取消进行中的拨号：关闭待定连接，回到拨号前的界面（随时可用，包括等待对方确认时）
+// 取消进行中的拨号：关闭待定连接（随时可用，包括等待对方确认时）
 function cancelDial() {
   if (!dialActive && !dialingFriend && !dialingCode) return;
   const conn = pendingDialConn;
@@ -2412,95 +2560,168 @@ function cancelDial() {
   dialingCode = false;
   clearDialTimeout();
   endDial();
-  isInitiator = false;
+  hideDialBanner();
   try { if (conn) conn.close(); } catch (e) { /* noop */ }
-  hide('connectingState');
-  show('sendSetup');
-  show('generateCodeStep');
-  hide('receiveConnecting');
-  show('receiveSetup');
   showToast('已取消连接', 'info');
 }
 
-// 连接建立后，聊天窗口按需放进 LocalSend 页面或"我要接收"页；断开后归还给"我要发送"页
-function placeSendInterfaceInLocalsend() {
-  placeChatInterfaceIn('localsendSession');
-  show('localsendSession');
+// ==================== 拨号横幅 & 会话辅助 ====================
+// 聊天窗口已固定在"聊天"标签页内，不再需要跨页移动 DOM 的旧逻辑
+function showDialBanner(text) {
+  const el = document.getElementById('chatDialBanner');
+  const t = document.getElementById('chatDialText');
+  if (el) el.classList.remove('hidden');
+  if (t && text) t.textContent = text;
+  switchTab('chat');
 }
 
-function placeChatInterfaceIn(parentId) {
-  const si = document.getElementById('sendInterface');
-  const parent = document.getElementById(parentId);
-  if (!si || !parent) return;
-  if (si.parentElement !== parent) parent.appendChild(si);
-  show('sendInterface');
+function hideDialBanner() {
+  const el = document.getElementById('chatDialBanner');
+  if (el) el.classList.add('hidden');
 }
 
-function restoreSendInterface() {
-  const si = document.getElementById('sendInterface');
-  const sm = document.getElementById('sendMode');
-  if (si && sm && si.parentElement !== sm) sm.appendChild(si);
-  hide('localsendSession');
+// 按 4 位设备码查找已有会话（同一设备重复连接时不再新建）
+function findSessionByDeviceId(deviceId) {
+  if (!deviceId) return null;
+  for (const s of sessions.values()) {
+    if (s.identity && s.identity.deviceId === deviceId) return s;
+    const peerId = String(s.key || '');
+    if (peerId === PEER_PREFIX_DEV + deviceId) return s;
+  }
+  return null;
+}
+
+function setActiveSession(key) {
+  activeSessionKey = key;
+  const s = sessions.get(key);
+  if (s && s.unread) s.unread = 0;
+}
+
+function getActiveSession() {
+  return activeSessionKey ? (sessions.get(activeSessionKey) || null) : null;
+}
+
+function hasActiveSessions() {
+  return sessions.size > 0;
+}
+
+// 会话显示名：优先 hello 握手身份，退化用 metadata / 前 8 位 ID
+function sessionDisplayName(s) {
+  if (s.identity && s.identity.deviceName) return s.identity.deviceName;
+  try {
+    const meta = s.conn.metadata || {};
+    if (typeof meta.deviceName === 'string' && meta.deviceName.trim()) return meta.deviceName.trim().slice(0, 40);
+  } catch (e) { /* noop */ }
+  const id = sessionPeerCode(s);
+  return id ? '设备 ' + id : '对方设备';
+}
+
+// 从 key 中取 4 位设备码（dev 前缀才有意义）
+function sessionPeerCode(s) {
+  const peerId = String(s.key || '');
+  return peerId.startsWith(PEER_PREFIX_DEV) ? safeId(peerId.slice(PEER_PREFIX_DEV.length)) : '';
+}
+
+// 会话头像配色：优先好友记录（与好友页一致），否则按名称哈希选色
+function sessionAvatarColors(s) {
+  const id = s.identity ? s.identity.deviceId : sessionPeerCode(s);
+  const f = id && friends.find(fr => fr.deviceId === id);
+  if (f && f.avatarColors) return f.avatarColors;
+  const seedName = sessionDisplayName(s);
+  const sum = Array.from(String(seedName)).reduce((h, c) => h + c.charCodeAt(0), 0);
+  return avatarColors[sum % avatarColors.length];
+}
+
+function myAvatarColors() {
+  const sum = Array.from(String(myDeviceName + myDeviceId)).reduce((h, c) => h + c.charCodeAt(0), 0);
+  return avatarColors[sum % avatarColors.length];
 }
 
 // LocalSend 设备行：空闲时发起连接；连接中再次点击即取消
 function onLocalsendRowClick(row) {
   if (localsendDialTarget === row.deviceId) { cancelDial(); return; }
   if (dialActive || dialingFriend || dialingCode) {
-    showToast('正在连接其他设备，请先取消当前连接', 'warning');
+    showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
-  if (connected || dataChannel) {
-    showToast('已有连接，请先在下方断开后再连接其他设备', 'warning');
+  // 已有该设备的会话：直接切到聊天
+  const existingSession = findSessionByDeviceId(row.deviceId);
+  if (existingSession) {
+    setActiveSession(existingSession.key);
+    switchTab('chat');
     return;
   }
   if (row.friendId) connectToFriend(row.friendId, 'localsend');
   else dialDevice(row.deviceId, 'localsend');
 }
 
-// ==================== Setup Data Channel ====================
-function setupConnection(conn) {
-  const viaLocalsend = isInitiator && dialFrom === 'localsend';
+// ==================== Setup Data Channel (multi-session) ====================
+// 每条连接一个会话对象；协议帧按会话路由，多连接并行互不干扰。
+// isInitiator/userConfirm 决定打开后是否自动切到聊天页（纯被动接收不打断当前操作）。
+function startCodeSessionWithConn(conn) {
+  // 码会话承载：本端作为发送方等待接收方拨入
+  if (codeTimer) { clearInterval(codeTimer); codeTimer = null; }
+  createSession(conn, { isInitiator: true, userConfirm: true, codeHosted: true });
+}
+
+function createSession(conn, opts) {
+  opts = opts || {};
+  const s = {
+    key: String(conn.peer),
+    conn: conn,
+    isInitiator: !!opts.isInitiator,
+    userConfirm: !!opts.userConfirm,    // 本端发起或已在弹窗主动确认 → 打开后自动切到聊天
+    codeHosted: !!opts.codeHosted,      // 会话由连接码承载 → 结束时销毁 codePeer 并复位码界面
+    identity: null,                     // hello 握手后填充 { deviceId, deviceName }
+    dialPurpose: opts.dialPurpose || 'connect',
+    autoAddNext: !!opts.autoAddNext,
+    fileQueue: [],
+    receivedFiles: [],
+    chatTexts: [],
+    currentTransfer: null,
+    currentReceive: null,
+    receivedChunks: [],
+    receivedBytes: 0,
+    textAssembly: {},
+    unread: 0,
+    closed: false
+  };
+  sessions.set(s.key, s);
   dialActive = false;
   pendingDialConn = null;
   dialFrom = null;
   localsendDialTarget = null;
-  dataChannel = conn;
-  connected = true;
-  remoteIdentity = null;
-
-  if (codeTimer) { clearInterval(codeTimer); codeTimer = null; }
+  dialingFriend = null;
+  dialingCode = false;
+  clearDialTimeout();
+  hideDialBanner();
 
   const handleOpen = () => {
-    if (!dataChannel || dataChannel !== conn) return;
-    updateConnectionStatus(true);
-
-    if (viaLocalsend) {
-      // LocalSend 来源：留在 LocalSend 页面，聊天窗口直接放在这里
-      placeSendInterfaceInLocalsend();
-      renderLocalsendList();
+    if (s.closed) return;
+    updateConnectionStatus();
+    // 会话归属：主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
+    if (s.isInitiator || s.userConfirm) {
+      activeSessionKey = s.key;
+      switchTab('chat');
     } else {
-      // 连接建立：双方统一进入聊天窗口（发起方在"我要发送"页，接收方移至"我要接收"页）
-      switchTab(isInitiator ? 'send' : 'receive');
-
-      if (isInitiator) {
-        hide('sendSetup');
-        hide('connectingState');
-        show('sendInterface');
+      if (!activeSessionKey || !sessions.has(activeSessionKey)) {
+        activeSessionKey = s.key; // 没有其他活跃会话时就显示新会话，只是不跳页
       } else {
-        hide('receiveSetup');
-        hide('receiveConnecting');
-        placeChatInterfaceIn('receiveMode');
-        show('sendInterface');
+        s.unread++;
       }
-      renderChat(true);
+      if (currentTab === 'chat') renderChat(true);
     }
-
-    showToast('连接已建立', 'success');
+    renderSessionChips();
+    const name = sessionDisplayName(s);
+    if (s.isInitiator || s.userConfirm) {
+      showToast('已与 ' + name + ' 建立连接', 'success');
+    } else {
+      showToast(name + ' 已与你建立连接，打开"聊天"标签查看', 'info');
+    }
 
     // 握手：向对方交换真实设备身份（双向，双方都能把对方加为好友）
     try {
-      sendControl({ type: 'hello', deviceId: myDeviceId, deviceName: myDeviceName });
+      sendControl(s, { type: 'hello', deviceId: myDeviceId, deviceName: myDeviceName });
     } catch (e) {
       console.warn('握手发送失败:', e);
     }
@@ -2509,44 +2730,47 @@ function setupConnection(conn) {
   if (conn.open) handleOpen();
   else conn.on('open', handleOpen);
 
-  conn.on('data', handleFrame);
+  conn.on('data', (data) => handleFrame(data, s));
 
-  conn.on('close', () => onConnectionLost());
+  conn.on('close', () => onSessionConnClosed(s));
 
   conn.on('error', (err) => {
     console.error('数据通道错误:', err);
   });
+  return s;
 }
 
-function onConnectionLost() {
-  if (!connected && !dataChannel) return;
-  const midReceive = currentReceive;
-  const midSend = currentTransfer;
-  connected = false;
+function onSessionConnClosed(s) {
+  if (!s || s.closed) return;
+  const midReceive = s.currentReceive;
+  const midSend = s.currentTransfer;
   if (midReceive) midReceive.status = 'failed';
   if (midSend) midSend.status = 'failed';
-  showToast('连接已断开' + (midReceive ? '，文件传输不完整' : ''), 'warning');
-  resetConnection();
+  showToast('与 ' + sessionDisplayName(s) + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' : ''), 'warning');
+  closeSession(s);
 }
 
 // ==================== Frame Protocol ====================
 // 每条消息统一带 1 字节帧头：0x01=控制(JSON/UTF-8)，0x02=文件数据
 // 规避 PeerJS 对字符串/二进制的序列化差异，中文文本不再有乱码风险
-function sendControl(obj) {
-  if (!dataChannel || !dataChannel.open) throw new Error('连接未就绪');
+// 多会话后首参为连接对象，次参为可选的会话指定（默认取当前活跃会话）
+function sendControl(s, obj) {
+  if (!s) s = getActiveSession();
+  if (!s || !s.conn || !s.conn.open) throw new Error('连接未就绪');
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
   const frame = new Uint8Array(1 + bytes.length);
   frame[0] = FRAME_CONTROL;
   frame.set(bytes, 1);
-  dataChannel.send(frame);
+  s.conn.send(frame);
 }
 
-function handleFrame(data) {
+function handleFrame(data, s) {
+  if (!s) return;
   if (typeof data === 'string') {
     // 兼容路径：旧版本发来的字符串控制消息
     try {
       const meta = JSON.parse(data);
-      if (meta && meta.type) handleControl(meta);
+      if (meta && meta.type) handleControl(meta, s);
     } catch (e) { console.warn('控制消息解析失败', e); }
     return;
   }
@@ -2554,107 +2778,97 @@ function handleFrame(data) {
   if (!u8 || u8.length === 0) return;
   if (u8[0] === FRAME_CONTROL) {
     try {
-      handleControl(JSON.parse(new TextDecoder('utf-8').decode(u8.subarray(1))));
+      handleControl(JSON.parse(new TextDecoder('utf-8').decode(u8.subarray(1))), s);
     } catch (e) {
       console.warn('控制消息解析失败', e);
     }
   } else if (u8[0] === FRAME_DATA) {
-    handleFileChunk(u8.subarray(1));
+    handleFileChunk(s, u8.subarray(1));
   } else {
     console.warn('收到未知帧类型:', u8[0]);
   }
 }
 
-function handleControl(msg) {
-  if (!msg || !msg.type) return;
+function handleControl(msg, s) {
+  if (!msg || !msg.type || !s) return;
   switch (msg.type) {
     case 'hello':
-      onRemoteHello(msg);
+      onRemoteHello(msg, s);
       break;
     case 'file-start':
-      beginReceive(msg);
+      beginReceive(s, msg);
       break;
     case 'file-end':
-      finishReceive(msg);
+      finishReceive(s, msg);
       break;
     case 'file-abort':
-      abortReceive(msg);
+      abortReceive(s, msg);
       break;
     case 'text-message':
-      showReceivedText(msg.content, '文本消息');
+      showReceivedText(s, msg.content, '文本消息');
       break;
     case 'clipboard-content':
-      showReceivedText(msg.content, '剪贴板内容');
+      showReceivedText(s, msg.content, '剪贴板内容');
       break;
     case 'text-start':
-      textAssembly[msg.id] = { kind: msg.kind || 'text-message', parts: new Array(msg.total || 0) };
+      s.textAssembly[msg.id] = { kind: msg.kind || 'text-message', parts: new Array(msg.total || 0) };
       break;
     case 'text-part': {
-      const a = textAssembly[msg.id];
+      const a = s.textAssembly[msg.id];
       if (a && a.parts && msg.seq >= 0 && msg.seq < a.parts.length) a.parts[msg.seq] = msg.content;
       break;
     }
     case 'text-end': {
-      const a = textAssembly[msg.id];
+      const a = s.textAssembly[msg.id];
       if (a) {
         const content = a.parts.join('');
-        delete textAssembly[msg.id];
-        showReceivedText(content, a.kind === 'clipboard-content' ? '剪贴板内容' : '文本消息');
+        delete s.textAssembly[msg.id];
+        showReceivedText(s, content, a.kind === 'clipboard-content' ? '剪贴板内容' : '文本消息');
       }
       break;
     }
   }
 }
 
-function onRemoteHello(msg) {
+function onRemoteHello(msg, s) {
   const deviceId = safeId(msg.deviceId);
   if (!deviceId || deviceId === myDeviceId) return;
-  remoteIdentity = {
+  s.identity = {
     deviceId: deviceId,
     deviceName: (msg.deviceName || '').trim() || '未知设备'
   };
 
-  // 聊天头部显示对方昵称与头像
-  const nameEl = document.getElementById('chatPeerName');
-  if (nameEl) nameEl.textContent = remoteIdentity.deviceName;
-  const avatarEl = document.getElementById('chatPeerAvatar');
-  if (avatarEl) {
-    const friend = friends.find(f => f.deviceId === remoteIdentity.deviceId);
-    const colors = (friend && friend.avatarColors) || avatarColors[(remoteIdentity.deviceId.charCodeAt(0) || 0) % avatarColors.length];
-    avatarEl.style.setProperty('--avatar-color-1', colors[0]);
-    avatarEl.style.setProperty('--avatar-color-2', colors[1]);
-    avatarEl.textContent = remoteIdentity.deviceName.charAt(0);
-  }
-  const statusEl = document.getElementById('chatPeerStatus');
-  if (statusEl) statusEl.textContent = '已连接 · 点对点加密';
+  // 会话在聊天页激活时才更新头部与消息流；chips 始终即时刷新
+  renderSessionChips();
+  if (activeSessionKey === s.key && currentTab === 'chat') renderChat(true);
 
-  const existing = friends.find(f => f.deviceId === remoteIdentity.deviceId);
+  const existing = friends.find(f => f.deviceId === deviceId);
   if (existing) {
     // 已是好友，无需提示
-  } else if (autoAddNextFriend) {
+  } else if (s.autoAddNext) {
     // 本端在确认弹窗选了"接受并添加为好友"
-    autoAddNextFriend = false;
-    addFriend(remoteIdentity.deviceName, remoteIdentity.deviceId);
-    showToast('已添加 ' + remoteIdentity.deviceName + ' 为好友', 'success');
-  } else if (dialPurpose === 'add-friend') {
+    s.autoAddNext = false;
+    addFriend(s.identity.deviceName, deviceId);
+    showToast('已添加 ' + s.identity.deviceName + ' 为好友', 'success');
+  } else if (s.dialPurpose === 'add-friend') {
     // 本端以"添加好友"目的发起，hello 到达即自动添加
-    dialPurpose = 'connect';
-    addFriend(remoteIdentity.deviceName, remoteIdentity.deviceId);
-    showToast('已添加 ' + remoteIdentity.deviceName + ' 为好友', 'success');
+    s.dialPurpose = 'connect';
+    addFriend(s.identity.deviceName, deviceId);
+    showToast('已添加 ' + s.identity.deviceName + ' 为好友', 'success');
   } else {
     // 双向弹窗：发送方和接收方都会收到提示
     setTimeout(() => {
-      if (connected && remoteIdentity && !friends.find(f => f.deviceId === remoteIdentity.deviceId)) {
-        promptAddFriend(remoteIdentity);
+      if (!s.closed && s.identity && !friends.find(f => f.deviceId === deviceId)) {
+        promptAddFriend(s);
       }
     }, 800);
   }
 }
 
 // ==================== Prompt Add Friend ====================
-function promptAddFriend(remote) {
-  const presetName = (isInitiator ? (document.getElementById('connectionName')?.value || '').trim() : '')
-    || remote.deviceName;
+function promptAddFriend(s) {
+  const remote = s.identity;
+  if (!remote) return;
 
   const modal = document.getElementById('friendActionModal');
   const title = document.getElementById('friendModalTitle');
@@ -2673,13 +2887,13 @@ function promptAddFriend(remote) {
     </div>
     <div class="mb-4">
       <label class="text-sm text-slate-500 mb-2 block">好友备注名</label>
-      <input type="text" id="newFriendName" value="${esc(presetName)}" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
+      <input type="text" id="newFriendName" value="${esc(remote.deviceName)}" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
     </div>
     <div class="flex gap-3">
       <button onclick="closeFriendModal()" class="flex-1 py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium">
         以后再说
       </button>
-      <button onclick="confirmAddFriend()" class="flex-1 py-3 rounded-xl btn-primary text-white font-medium">
+      <button onclick="confirmAddSessionFriend()" class="flex-1 py-3 rounded-xl btn-primary text-white font-medium">
         添加好友
       </button>
     </div>
@@ -2688,19 +2902,17 @@ function promptAddFriend(remote) {
   modal.classList.remove('hidden');
 }
 
-function confirmAddFriend() {
-  if (!remoteIdentity) {
-    closeFriendModal();
-    return;
-  }
+function confirmAddSessionFriend() {
+  closeFriendModal();
+  const s = getActiveSession();
+  if (!s || !s.identity) return;
   const nameInput = document.getElementById('newFriendName');
-  const name = (nameInput ? nameInput.value : '').trim() || remoteIdentity.deviceName;
-  const existing = friends.find(f => f.deviceId === remoteIdentity.deviceId);
+  const name = (nameInput ? nameInput.value : '').trim() || s.identity.deviceName;
+  const existing = friends.find(f => f.deviceId === s.identity.deviceId);
   if (!existing) {
-    addFriend(name, remoteIdentity.deviceId);
+    addFriend(name, s.identity.deviceId);
     showToast(`已添加 ${name} 为好友`, 'success');
   }
-  closeFriendModal();
 }
 
 // ==================== File Handling ====================
@@ -2735,6 +2947,11 @@ function setupFileInput() {
 }
 
 function handleFiles(files) {
+  const s = getActiveSession();
+  if (!s) {
+    showToast('请先建立连接再发送文件（从好友列表或 LocalSend 发起）', 'warning');
+    return;
+  }
   Array.from(files).forEach(file => {
     const fileItem = {
       id: Date.now() + Math.random(),
@@ -2746,19 +2963,20 @@ function handleFiles(files) {
       status: 'pending',
       addedAt: Date.now()
     };
-    fileQueue.push(fileItem);
+    s.fileQueue.push(fileItem);
   });
-  renderFileQueue(true);
+  renderChat(true);
   // 聊天模式：文件入选后自动排队发送
-  if (connected && dataChannel && dataChannel.open) processSendQueue();
+  if (s.conn && s.conn.open) processSendQueue(s);
 }
 
-// 单文件传输通道：上一个发完自动接着发队列中的下一个
-function processSendQueue() {
-  if (currentTransfer) return;
-  if (!dataChannel || !dataChannel.open) return;
-  const next = fileQueue.find(i => i.status === 'pending');
-  if (next) sendFile(next.id);
+// 单文件传输通道：每个会话独立一条；上一个发完自动接着发该会话队列中的下一个
+function processSendQueue(s) {
+  if (!s) return;
+  if (s.currentTransfer) return;
+  if (!s.conn || !s.conn.open) return;
+  const next = s.fileQueue.find(i => i.status === 'pending');
+  if (next) sendFileOn(s, next.id);
 }
 
 function getFileType(filename) {
@@ -2883,14 +3101,13 @@ function stopRenderHeartbeat(item) {
   }
 }
 
-// ==================== 聊天窗口：统一消息流渲染 ====================
-// 文本消息（双向）也进入消息流；文件发送靠右、接收靠左
-let chatTexts = [];  // { id, dir:'in'|'out', label, content, addedAt }
-
-function chatMergedItems() {
-  const out = fileQueue.map(i => ({ ref: i, id: i.id, dir: 'out', kind: 'file', addedAt: i.addedAt || 0 }));
-  const inc = receivedFiles.map(i => ({ ref: i, id: i.id, dir: 'in', kind: 'file', addedAt: i.addedAt || 0 }));
-  const txt = chatTexts.map(i => ({ ref: i, id: i.id, dir: i.dir, kind: 'text', addedAt: i.addedAt || 0 }));
+// ==================== 聊天窗口：统一消息流渲染（按会话隔离） ====================
+// 文本消息（双向）也进入消息流；文件发送靠右、接收靠左；
+// 每侧消息带头像框：左侧=对方头像，右侧=我的头像
+function chatMergedItems(s) {
+  const out = s.fileQueue.map(i => ({ ref: i, id: i.id, dir: 'out', kind: 'file', addedAt: i.addedAt || 0 }));
+  const inc = s.receivedFiles.map(i => ({ ref: i, id: i.id, dir: 'in', kind: 'file', addedAt: i.addedAt || 0 }));
+  const txt = s.chatTexts.map(i => ({ ref: i, id: i.id, dir: i.dir, kind: 'text', addedAt: i.addedAt || 0 }));
   return out.concat(inc, txt).sort((a, b) => a.addedAt - b.addedAt);
 }
 
@@ -2899,11 +3116,21 @@ function queueItemMetaHtml(item, metaExtra, accent) {
   return formatFileSize(item.size) + (metaExtra ? ' · <span class="font-medium ' + (accent ? 'text-accent-500' : 'text-primary-500') + ' tabular-nums">' + metaExtra + '</span>' : '');
 }
 
+// 小头像框（消息条目两侧）：peer 左侧 / mine 右侧
+function chatItemAvatarHtml(dir, s) {
+  const colors = dir === 'out' ? myAvatarColors() : sessionAvatarColors(s);
+  const name = dir === 'out' ? myDeviceName : sessionDisplayName(s);
+  const letter = (name || '?').charAt(0);
+  return `
+    <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 self-end mb-0.5 ${dir === 'out' ? 'order-3' : 'order-none'}" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};" title="${esc(name)}">${esc(letter)}</div>
+  `;
+}
+
 // 单条消息节点：文件卡片（含进度/状态/操作）或文本气泡；out 靠右、in 靠左
-function buildChatItemEl(entry, animate) {
+function buildChatItemEl(entry, s, animate) {
   const item = entry.ref;
   const wrap = document.createElement('div');
-  wrap.className = 'flex ' + (entry.dir === 'out' ? 'justify-end' : 'justify-start') + (animate ? ' animate-slide-up' : '');
+  wrap.className = 'flex items-end gap-2 ' + (entry.dir === 'out' ? 'justify-end order-3' : 'justify-start') + (animate ? ' animate-slide-up' : '');
   wrap.dataset.fid = String(entry.id);
   wrap.dataset.status = entry.kind === 'file' ? item.status : 'text';
 
@@ -2912,7 +3139,8 @@ function buildChatItemEl(entry, animate) {
       ? item.content.slice(0, 5000) + '\n…（内容过长，显示已截断，点击复制可获取全文）'
       : item.content;
     wrap.innerHTML = `
-      <div class="max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-primary-500 text-white rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
+      ${chatItemAvatarHtml(entry.dir, s)}
+      <div class="max-w-[300px] sm:max-w-[400px] ${entry.dir === 'out' ? 'order-2' : 'order-2'} rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-primary-500 text-white rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
         <div class="flex items-center justify-between gap-3 mb-1">
           <span class="text-xs ${entry.dir === 'out' ? 'text-white/70' : 'text-slate-400'}">${esc(item.label || '文本消息')}</span>
           <button type="button" data-copy class="text-xs ${entry.dir === 'out' ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:text-primary-500'} transition-all flex-shrink-0"><i class="fas fa-copy mr-1"></i>复制</button>
@@ -2958,7 +3186,8 @@ function buildChatItemEl(entry, animate) {
   }
 
   wrap.innerHTML = `
-    <div class="w-full max-w-[520px] ${out ? 'bg-primary-500/10 border border-primary-200/60' : 'bg-white border border-slate-200'} rounded-2xl p-3.5">
+    ${chatItemAvatarHtml(entry.dir, s)}
+    <div class="order-2 max-w-[400px] sm:max-w-[460px] ${out ? 'bg-primary-500/10 border border-primary-200/60' : 'bg-white border border-slate-200'} rounded-2xl p-3.5">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
           <i class="fas ${iconInfo.icon} ${iconInfo.color}"></i>
@@ -2995,10 +3224,27 @@ function renderChat(force) {
   lastQueueRender = now;
 
   const box = document.getElementById('chatMessages');
-  if (!box) return;
-  const merged = chatMergedItems();
+  const noSession = document.getElementById('chatNoSessionState');
+  const si = document.getElementById('sendInterface');
+  const s = getActiveSession();
 
+  const showWin = !!s && currentTab === 'chat';
+  if (si) si.classList.toggle('hidden', !showWin);
+  if (noSession) noSession.classList.toggle('hidden', !(!s && currentTab === 'chat'));
+  if (!s) {
+    if (box) {
+      const hint = document.getElementById('chatEmptyHint');
+      box.querySelectorAll('[data-fid]').forEach(el => el.remove());
+      if (hint) hint.classList.add('hidden');
+    }
+    renderChatHeader(null);
+    return;
+  }
+
+  if (!box) return;
+  renderChatHeader(s);
   const hint = document.getElementById('chatEmptyHint');
+  const merged = chatMergedItems(s);
   if (hint) hint.classList.toggle('hidden', merged.length > 0);
 
   // 增量更新：仅新增/状态变化时重建对应节点；传输中只改进度条宽度与速率文本，布局保持稳定
@@ -3008,10 +3254,10 @@ function renderChat(force) {
     const pos = idx + anchorOffset;
     let el = box.children[pos];
     if (!el || el.dataset.fid !== key) {
-      el = buildChatItemEl(entry, true); // 真正的新条目才有滑入动画
+      el = buildChatItemEl(entry, s, true); // 真正的新条目才有滑入动画
       box.insertBefore(el, box.children[pos] || null);
     } else if (el.dataset.status !== (entry.kind === 'file' ? entry.ref.status : 'text')) {
-      const next = buildChatItemEl(entry, false); // 状态切换只换节点，不播动画
+      const next = buildChatItemEl(entry, s, false); // 状态切换只换节点，不播动画
       el.replaceWith(next);
       el = next;
     } else if (entry.kind === 'file') {
@@ -3034,28 +3280,106 @@ function renderChat(force) {
   if (nearBottom) box.scrollTop = box.scrollHeight;
 }
 
+// 聊天头部：显示当前会话对方的昵称/头像/状态
+function renderChatHeader(s) {
+  const nameEl = document.getElementById('chatPeerName');
+  const avatarEl = document.getElementById('chatPeerAvatar');
+  const statusEl = document.getElementById('chatPeerStatus');
+  if (!nameEl || !avatarEl) return;
+  if (!s) {
+    nameEl.textContent = '未连接';
+    statusEl.textContent = '从好友列表或 LocalSend 发起连接';
+    avatarEl.textContent = '?';
+    avatarEl.style.removeProperty('--avatar-color-1');
+    avatarEl.style.removeProperty('--avatar-color-2');
+    return;
+  }
+  const name = sessionDisplayName(s);
+  nameEl.textContent = name;
+  statusEl.textContent = '已连接 · 点对点加密' + (sessions.size > 1 ? '（共 ' + sessions.size + ' 个连接）' : '');
+  const colors = sessionAvatarColors(s);
+  avatarEl.style.setProperty('--avatar-color-1', colors[0]);
+  avatarEl.style.setProperty('--avatar-color-2', colors[1]);
+  avatarEl.textContent = (name || '?').charAt(0);
+}
+
+// 会话切换条：所有活动会话 chips（头像+昵称+未读数），点击切换，×关闭该会话
+function renderSessionChips() {
+  const box = document.getElementById('sessionChips');
+  if (!box) return;
+  const list = Array.from(sessions.values());
+  box.classList.toggle('hidden', list.length === 0);
+  box.innerHTML = '';
+  list.forEach(s => {
+    const name = sessionDisplayName(s);
+    const colors = sessionAvatarColors(s);
+    const active = activeSessionKey === s.key;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'flex items-center gap-2 pl-1.5 pr-2.5 py-1.5 rounded-full border transition-all text-left max-w-[220px] ' +
+      (active ? 'bg-primary-500 border-primary-500 text-white shadow-md' : 'glass border-slate-200 hover:bg-white text-slate-700');
+    chip.onclick = () => {
+      setActiveSession(s.key);
+      if (currentTab !== 'chat') switchTab('chat');
+      else renderChat(true);
+      renderSessionChips();
+    };
+    chip.innerHTML = `
+      <span class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">${esc((name || '?').charAt(0))}</span>
+      <span class="text-xs font-medium truncate">${esc(name)}</span>
+      ${s.unread > 0 ? '<span class="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center flex-shrink-0">' + (s.unread > 9 ? '9+' : s.unread) + '</span>' : ''}
+      <span data-session-close class="unset w-5 h-5 rounded-full hover:bg-red-500 hover:text-white flex items-center justify-center flex-shrink-0 text-xs ${active ? 'text-white/70' : 'text-slate-400'}" title="断开此连接">✕</span>
+    `;
+    const closeBtn = chip.querySelector('[data-session-close]');
+    if (closeBtn) closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      closeSession(s, '已断开连接');
+    };
+    box.appendChild(chip);
+  });
+  updateChatTabBadge();
+}
+
+// 聊天 tab 上的未读总数徽标
+function updateChatTabBadge() {
+  const badge = document.getElementById('chatTabBadge');
+  if (!badge) return;
+  const total = Array.from(sessions.values()).reduce((n, s) => n + (s.unread || 0), 0);
+  badge.textContent = total > 9 ? '9+' : String(total);
+  badge.classList.toggle('hidden', total === 0);
+}
+
 function renderFileQueue(force) { renderChat(force); }
 
 // ==================== Send File ====================
 // 关键修复：
-// 1. 同一时间只允许一个文件在传（防止接收端缓冲被交叉写坏）
+// 1. 同一会话同一时间只允许一个文件在传（防止接收端缓冲被交叉写坏）；不同会话可并行传输
 // 2. 真实背压：基于底层 RTCDataChannel.bufferedAmount，防止灌爆发送缓冲
 // 3. 15KB 分块低于 PeerJS 内部分片阈值，避免二次拆包重组
 // 4. 渲染节流，UI 不再卡死
-async function sendFile(fileId) {
-  const item = fileQueue.find(f => String(f.id) === String(fileId));
+function sendFile(fileId) {
+  const s = getActiveSession();
+  if (!s) {
+    showToast('连接未就绪', 'error');
+    return;
+  }
+  sendFileOn(s, fileId);
+}
+
+async function sendFileOn(s, fileId) {
+  const item = s.fileQueue.find(f => String(f.id) === String(fileId));
   if (!item) return;
-  if (!dataChannel || !dataChannel.open) {
+  if (!s.conn || !s.conn.open) {
     showToast('连接未就绪', 'error');
     return;
   }
   if (item.status === 'sending') return;
-  if (currentTransfer) {
-    showToast('有文件正在发送，请等待完成后再发下一个', 'warning');
+  if (s.currentTransfer) {
+    showToast('该会话有文件正在发送，请等待完成后再发下一个', 'warning');
     return;
   }
 
-  currentTransfer = item;
+  s.currentTransfer = item;
   item.status = 'sending';
   // 速率统计：滑动窗口采样 + 渲染心跳
   item.samples = [{ t: Date.now(), b: 0 }];
@@ -3065,7 +3389,7 @@ async function sendFile(fileId) {
   renderFileQueue(true);
 
   try {
-    sendControl({
+    sendControl(s, {
       type: 'file-start',
       id: item.id,
       name: item.name,
@@ -3077,23 +3401,23 @@ async function sendFile(fileId) {
     const t0 = Date.now();
     let offset = 0;
     let frameCount = 0;
+    const conn = s.conn;
 
     while (offset < file.size) {
-      if (!dataChannel || !dataChannel.open) throw new Error('连接已断开');
+      if (!s.conn || !s.conn.open) throw new Error('连接已断开');
 
       const sliceEnd = Math.min(offset + CHUNK_SIZE, file.size);
       const buf = await file.slice(offset, sliceEnd).arrayBuffer();
 
-      await waitForDrain(frameCount);
+      await waitForDrain(s, frameCount);
 
       const frame = new Uint8Array(1 + buf.byteLength);
       frame[0] = FRAME_DATA;
       frame.set(new Uint8Array(buf), 1);
-      dataChannel.send(frame);
+      conn.send(frame);
 
       offset += buf.byteLength;
       frameCount++;
-      transferStats.sent += buf.byteLength;
       item.sentBytes = offset;
       const newProgress = Math.floor((offset / file.size) * 100);
       item.progress = newProgress;
@@ -3104,39 +3428,39 @@ async function sendFile(fileId) {
       }
     }
 
-    sendControl({ type: 'file-end', id: item.id });
+    sendControl(s, { type: 'file-end', id: item.id });
 
     item.status = 'sent';
     item.progress = 100;
     item.totalMs = Date.now() - t0;
     renderFileQueue(true);
     showToast(`文件 "${item.name}" 已发送（${formatSpeed(file.size / (item.totalMs / 1000))}）`, 'success');
-    updateFriendTransferByRemote();
-    addHistoryEntry({ dir: 'out', kind: 'file', name: item.name, size: item.size, peer: currentPeerName() });
+    updateFriendTransferByRemote(s);
+    addHistoryEntry({ dir: 'out', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s) });
   } catch (error) {
     console.error('Error sending file:', error);
     item.status = 'failed';
-    try { sendControl({ type: 'file-abort', id: item.id }); } catch (e) { /* noop */ }
+    try { sendControl(s, { type: 'file-abort', id: item.id }); } catch (e) { /* noop */ }
     renderFileQueue(true);
     showToast('发送失败：' + (error.message || '连接中断'), 'error');
   } finally {
     stopRenderHeartbeat(item);
-    currentTransfer = null;
-    // 队列中还有等待的文件则自动接续发送
-    setTimeout(processSendQueue, 50);
+    s.currentTransfer = null;
+    // 该会话队列中还有等待的文件则自动接续发送
+    setTimeout(() => processSendQueue(s), 50);
   }
 }
 
-// 背压控制：写满高水位就暂停，排空到低水位再继续
-function waitForDrain(frameCount) {
-  const amount = getBufferedAmount();
+// 背压控制：写满高水位就暂停，排空到低水位再继续（按会话隔离）
+function waitForDrain(s, frameCount) {
+  const amount = connBufferedAmount(s.conn);
   if (amount < HIGH_WATER) return Promise.resolve();
 
   return new Promise(resolve => {
     const started = Date.now();
     const tick = () => {
-      if (!dataChannel || !dataChannel.open) return resolve();
-      if (getBufferedAmount() < LOW_WATER) return resolve();
+      if (!s.conn || !s.conn.open || s.closed) return resolve();
+      if (connBufferedAmount(s.conn) < LOW_WATER) return resolve();
       if (Date.now() - started > 10000) return resolve(); // 安全阀：极端情况下放行由上层校验兜底
       setTimeout(tick, 20);
     };
@@ -3144,10 +3468,20 @@ function waitForDrain(frameCount) {
   });
 }
 
+// 发送到"当前不在看"的会话 → 未读计数 + tab 徽标
+function isChatNotViewed(s) {
+  return s.key !== activeSessionKey || currentTab !== 'chat';
+}
+
 // ==================== Send Text ====================
-// 发送的文本进入消息流（靠右气泡），与收到的文本（靠左）共用时间线
-function pushChatText(dir, label, content) {
-  chatTexts.push({ id: 't' + Date.now() + Math.random(), dir, label, content, addedAt: Date.now() });
+// 发送的文本进入会话消息流（靠右气泡），与收到的文本（靠左）共用时间线
+function pushChatText(s, dir, label, content) {
+  s.chatTexts.push({ id: 't' + Date.now() + Math.random(), dir, label, content, addedAt: Date.now() });
+  // 非当前展示的会话收到新内容 → 未读计数 + tab 徽标
+  if (isChatNotViewed(s)) {
+    s.unread = (s.unread || 0) + 1;
+    renderSessionChips();
+  }
   renderChat(true);
 }
 
@@ -3158,19 +3492,21 @@ function sendChatText() {
     showToast('请输入文本内容', 'warning');
     return;
   }
-  if (!dataChannel || !dataChannel.open) {
+  const s = getActiveSession();
+  if (!s || !s.conn || !s.conn.open) {
     showToast('连接未就绪', 'error');
     return;
   }
-  if (sendTextMessage(text, 'text-message')) {
+  if (sendTextMessage(s, text, 'text-message')) {
     input.value = '';
-    pushChatText('out', '文本消息', text);
+    pushChatText(s, 'out', '文本消息', text);
   }
 }
 
 // ==================== Send Clipboard ====================
 async function sendClipboard() {
-  if (!dataChannel || !dataChannel.open) {
+  const s = getActiveSession();
+  if (!s || !s.conn || !s.conn.open) {
     showToast('连接未就绪', 'error');
     return;
   }
@@ -3180,8 +3516,8 @@ async function sendClipboard() {
       showToast('剪贴板为空', 'warning');
       return;
     }
-    if (sendTextMessage(text, 'clipboard-content')) {
-      pushChatText('out', '剪贴板内容', text);
+    if (sendTextMessage(s, text, 'clipboard-content')) {
+      pushChatText(s, 'out', '剪贴板内容', text);
       showToast('剪贴板内容已发送', 'success');
     }
   } catch (error) {
@@ -3190,28 +3526,28 @@ async function sendClipboard() {
 }
 
 // 长文本按码点分片发送，避免超过帧大小限制
-function sendTextMessage(content, kind) {
+function sendTextMessage(s, content, kind) {
   try {
     const chars = Array.from(content);
     if (chars.length <= TEXT_PART_CHARS) {
-      sendControl({ type: kind, content: content });
+      sendControl(s, { type: kind, content: content });
     } else {
       const id = Date.now();
       const total = Math.ceil(chars.length / TEXT_PART_CHARS);
-      sendControl({ type: 'text-start', id: id, kind: kind, total: total });
+      sendControl(s, { type: 'text-start', id: id, kind: kind, total: total });
       for (let i = 0; i < total; i++) {
-        sendControl({
+        sendControl(s, {
           type: 'text-part', id: id, seq: i,
           content: chars.slice(i * TEXT_PART_CHARS, (i + 1) * TEXT_PART_CHARS).join('')
         });
       }
-      sendControl({ type: 'text-end', id: id });
+      sendControl(s, { type: 'text-end', id: id });
     }
     addHistoryEntry({
       dir: 'out', kind: 'text',
       name: kind === 'clipboard-content' ? '剪贴板内容' : '文本消息',
       size: chars.length,
-      peer: currentPeerName()
+      peer: sessionDisplayName(s)
     });
     return true;
   } catch (e) {
@@ -3222,12 +3558,12 @@ function sendTextMessage(content, kind) {
 }
 
 // ==================== Receive Data ====================
-function beginReceive(msg) {
+function beginReceive(s, msg) {
   const rid = safeId(msg && msg.id);
   if (!rid || !msg.name) return;
-  if (currentReceive) {
-    currentReceive.status = 'failed'; // 防御：乱序保护
-    stopRenderHeartbeat(currentReceive);
+  if (s.currentReceive) {
+    s.currentReceive.status = 'failed'; // 防御：乱序保护
+    stopRenderHeartbeat(s.currentReceive);
   }
 
   const item = {
@@ -3243,66 +3579,72 @@ function beginReceive(msg) {
     totalMs: null,
     addedAt: Date.now()
   };
-  receivedFiles.push(item);
-  currentReceive = item;
-  receivedChunks = [];
-  receivedBytes = 0;
+  s.receivedFiles.push(item);
+  s.currentReceive = item;
+  s.receivedChunks = [];
+  s.receivedBytes = 0;
   item._t0 = Date.now();
-  startRenderHeartbeat(item, renderReceivedFiles);
+  startRenderHeartbeat(item, () => renderChat());
+  // 后台会话收到新内容 → 未读 + tab 徽标 + 提示
+  if (isChatNotViewed(s)) {
+    s.unread = (s.unread || 0) + 1;
+    renderSessionChips();
+    showToast(sessionDisplayName(s) + ' 正在发送文件', 'info');
+  }
 
   renderReceivedFiles(true);
 }
 
-function handleFileChunk(payload) {
-  if (!currentReceive) return;
-  receivedChunks.push(payload);
-  receivedBytes += payload.byteLength;
-    if (currentReceive.status === 'receiving') {
-      currentReceive.receivedBytes = receivedBytes;
-      if (currentReceive.size > 0) {
-        currentReceive.progress = Math.min(99, Math.floor((receivedBytes / currentReceive.size) * 100));
+function handleFileChunk(s, payload) {
+  if (!s || !s.currentReceive) return;
+  s.receivedChunks.push(payload);
+  s.receivedBytes += payload.byteLength;
+    if (s.currentReceive.status === 'receiving') {
+      s.currentReceive.receivedBytes = s.receivedBytes;
+      if (s.currentReceive.size > 0) {
+        s.currentReceive.progress = Math.min(99, Math.floor((s.receivedBytes / s.currentReceive.size) * 100));
       }
-      sampleProgress(currentReceive, receivedBytes);
-      if ((currentReceive.progress - currentReceive._lastRenderProgress || 0) >= 1 || currentReceive.progress >= 99) {
-        currentReceive._lastRenderProgress = currentReceive.progress;
+      sampleProgress(s.currentReceive, s.receivedBytes);
+      if ((s.currentReceive.progress - s.currentReceive._lastRenderProgress || 0) >= 1 || s.currentReceive.progress >= 99) {
+        s.currentReceive._lastRenderProgress = s.currentReceive.progress;
         renderReceivedFiles();
       }
     }
 }
 
-function finishReceive(msg) {
-  const item = currentReceive;
+function finishReceive(s, msg) {
+  const item = s.currentReceive;
   if (!item || !msg || safeId(msg.id) !== item.id) return;
 
   // 完整性校验：字节数不符就明确报错，不再静默保存坏文件
-  if (receivedBytes === item.size) {
-    item.blob = new Blob(receivedChunks, { type: item.type });
+  if (s.receivedBytes === item.size) {
+    item.blob = new Blob(s.receivedChunks, { type: item.type });
     item.status = 'received';
     item.progress = 100;
     item.totalMs = Date.now() - (item._t0 || Date.now());
     saveReceivedBlob(item); // 已授权目录则直接写入，否则走浏览器下载
-    updateFriendTransferByRemote();
-    addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: currentPeerName() });
+    updateFriendTransferByRemote(s);
+    addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s) });
   } else {
     item.status = 'failed';
-    showToast(`文件 "${item.name}" 传输不完整（${formatFileSize(receivedBytes)}/${formatFileSize(item.size)}）`, 'error');
+    showToast(`文件 "${item.name}" 传输不完整（${formatFileSize(s.receivedBytes)}/${formatFileSize(item.size)}）`, 'error');
   }
 
   stopRenderHeartbeat(item);
-  currentReceive = null;
-  receivedChunks = [];
-  receivedBytes = 0;
+  s.currentReceive = null;
+  s.receivedChunks = [];
+  s.receivedBytes = 0;
   renderReceivedFiles(true);
 }
 
-function abortReceive(msg) {
-  const item = currentReceive;
+function abortReceive(s, msg) {
+  const item = s.currentReceive;
   if (!item || !msg || safeId(msg.id) !== item.id) return;
   item.status = 'failed';
   stopRenderHeartbeat(item);
-  currentReceive = null;
-  receivedChunks = [];
-  receivedBytes = 0;
+  s.currentReceive = null;
+  s.receivedChunks = [];
+  s.receivedBytes = 0;
   renderReceivedFiles(true);
   showToast(`对方中止了 "${item.name}" 的传输`, 'warning');
 }
@@ -3310,10 +3652,16 @@ function abortReceive(msg) {
 function renderReceivedFiles(force) { renderChat(force); }
 
 function downloadReceivedFile(itemId) {
-  const item = receivedFiles.find(f => String(f.id) === String(itemId));
-  if (item && item.blob) {
-    downloadFile(item.blob, item.name);
+  // 文件可能在任一会话中接收，全局匹配
+  for (const s of sessions.values()) {
+    const item = s.receivedFiles.find(f => String(f.id) === String(itemId));
+    if (item && item.blob) {
+      downloadFile(item.blob, item.name);
+      return;
+    }
   }
+  // 会话已断开但文件仍保留过 → 查已关闭会话不可达，提示重新让发送方传输
+  showToast('文件数据已随连接关闭而释放', 'warning');
 }
 
 function downloadFile(blob, filename) {
@@ -3328,97 +3676,60 @@ function downloadFile(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-function showReceivedText(content, label) {
+function showReceivedText(s, content, label) {
   if (typeof content !== 'string') return;
-  pushChatText('in', label, content);
+  pushChatText(s, 'in', label, content);
   showToast(`收到${label}`, 'success');
-  addHistoryEntry({ dir: 'in', kind: 'text', name: label, size: content.length, peer: currentPeerName() });
+  addHistoryEntry({ dir: 'in', kind: 'text', name: label, size: content.length, peer: sessionDisplayName(s) });
 }
 
 // ==================== Connection Management ====================
+// 断开当前展示的会话
 function disconnect() {
-  const conn = dataChannel;
-  connected = false;
-  dataChannel = null;
-  try { if (conn) conn.close(); } catch (e) { /* noop */ }
-  resetConnection();
+  const s = getActiveSession();
+  if (!s) {
+    showToast('当前没有活动连接', 'info');
+    return;
+  }
+  closeSession(s);
   showToast('已断开连接', 'info');
 }
 
-function resetConnection() {
-  if (codeTimer) { clearInterval(codeTimer); codeTimer = null; }
-  clearDialTimeout();
-  // 清理所有传输项的渲染心跳，防止定时器泄漏
-  fileQueue.forEach(stopRenderHeartbeat);
-  receivedFiles.forEach(stopRenderHeartbeat);
+// 关闭单个会话：清理传输心跳、切到剩余会话、复位聊天窗口；不影响其他会话
+function closeSession(s) {
+  if (!s || s.closed) return;
+  s.closed = true;
+  s.fileQueue.forEach(stopRenderHeartbeat);
+  s.receivedFiles.forEach(stopRenderHeartbeat);
+  if (s.currentTransfer) s.currentTransfer.status = 'failed';
+  if (s.currentReceive) s.currentReceive.status = 'failed';
+  try { if (s.conn) s.conn.close(); } catch (e) { /* noop */ }
+  sessions.delete(s.key);
 
-  connected = false;
-  isInitiator = false;
-  currentTransfer = null;
-  currentReceive = null;
-  fileQueue = [];
-  receivedFiles = [];
-  chatTexts = [];
-  receivedChunks = [];
-  receivedBytes = 0;
-  sessionCode = null;
-  remoteIdentity = null;
-  dialingFriend = null;
-  dialingCode = false;
-  autoAddNextFriend = false;
-  dialPurpose = 'connect';
-
-  updateConnectionStatus(false);
-  endDial();
-
-  const wasLocalSession = !document.getElementById('localsendSession').classList.contains('hidden');
-  restoreSendInterface();
-  show('sendSetup');
-  show('generateCodeStep');
-  hide('shareCodeStep');
-  hide('connectingState');
-  hide('sendInterface');
-  show('receiveSetup');
-  hide('receiveConnecting');
-  if (wasLocalSession) renderLocalsendList();
-  else switchTab('home');
-
-  const codeDisplay = document.getElementById('codeDisplay');
-  if (codeDisplay) codeDisplay.textContent = '------';
-  const offerCodeInput = document.getElementById('offerCodeInput');
-  if (offerCodeInput) offerCodeInput.value = '';
-  // 聊天消息流复位：清空所有消息节点，只留空状态提示
-  const chatBox = document.getElementById('chatMessages');
-  if (chatBox) {
-    const hint = document.getElementById('chatEmptyHint');
-    chatBox.innerHTML = '';
-    if (hint) chatBox.appendChild(hint);
-    const hintEl = document.getElementById('chatEmptyHint');
-    if (hintEl) hintEl.classList.remove('hidden');
+  if (activeSessionKey === s.key) {
+    const it = sessions.values().next();
+    activeSessionKey = it.done ? null : it.value.key;
   }
-  const nameEl = document.getElementById('chatPeerName');
-  if (nameEl) nameEl.textContent = '对方设备';
-  const avatarEl = document.getElementById('chatPeerAvatar');
-  if (avatarEl) avatarEl.textContent = '?';
-  const textInput = document.getElementById('chatTextInput');
-  if (textInput) textInput.value = '';
 
-  // 恢复稳定设备 Peer（可接收好友直连）。
-  // 若当前 peer 已是设备类 peer（接收方/被直连方直接从 stable peer 发起连接的场景），
-  // 直接复用，避免销毁重建导致服务器端 ID 释放延迟 → unavailable-id。
-  if (!peer || peer.__kind === 'code' || peer.destroyed) {
-    initializePeer();
+  updateConnectionStatus();
+  if (s.codeHosted) {
+    // 连接码会话结束：销毁 codePeer、复位连接码界面
+    codeTimer = null;
+    closeCodeSession();
   }
+  renderSessionChips();
+  if (currentTab === 'chat') renderChat(true);
 }
 
-function updateConnectionStatus(isConnected) {
-  document.body.classList.toggle('is-connected', !!isConnected);
+function updateConnectionStatus() {
+  const isConnected = hasActiveSessions();
+  document.body.classList.toggle('is-connected', isConnected);
   const statusEl = document.getElementById('connectionStatus');
   if (!statusEl) return;
   if (isConnected) {
     statusEl.innerHTML = `
       <span class="status-dot bg-green-500 text-green-500"></span>
-      <span class="text-slate-500">已连接</span>
+      <span class="text-slate-500">已连接${sessions.size > 1 ? ' · ' + sessions.size + ' 个' : ''}</span>
     `;
   } else {
     statusEl.innerHTML = `
@@ -3701,7 +4012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadHistory();
   // 功能视图常驻主页内容区，分段标签切换显示；默认落在好友列表
   const tabContent = document.getElementById('tabContent');
-  ['friendsMode', 'sendMode', 'receiveMode', 'historyMode', 'localsendMode'].forEach(id => {
+  ['friendsMode', 'sendMode', 'receiveMode', 'chatMode', 'historyMode', 'localsendMode'].forEach(id => {
     const el = document.getElementById(id);
     if (el) tabContent.appendChild(el);
   });
@@ -3722,6 +4033,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initializePeer();
   renderDeviceAddress();
   updateLanIpDisplay().then(() => initLanDiscovery());
+  initPresenceBeacon(); // 全局在线信标：跨网络好友的纸飞机亮蓝
+  renderSessionChips();
   // LocalSend 列表定期刷新：TTL 过期的设备离线消失，状态行的发现数同步
   setInterval(() => {
     const mode = document.getElementById('localsendMode');
