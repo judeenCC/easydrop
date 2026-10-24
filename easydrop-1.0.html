@@ -654,8 +654,12 @@ tailwind.config = {
 
             <div id="chatInputBar" class="bg-slate-50 border border-slate-200 rounded-full pl-2 pr-2 py-1.5 flex items-center gap-1 transition-all">
               <input type="file" id="fileInput" multiple class="hidden">
+              <input type="file" id="folderInput" webkitdirectory multiple class="hidden">
               <button onclick="document.getElementById('fileInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
                 <i class="fas fa-plus text-slate-500"></i>
+              </button>
+              <button onclick="document.getElementById('folderInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送整个文件夹（含子文件夹内所有文件）">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.1H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
               </button>
               <button onclick="sendClipboard()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
                 <i class="fas fa-clipboard text-slate-400"></i>
@@ -1275,7 +1279,7 @@ function refreshOnlineDevices() {
     icon.classList.add('animate-spin');
     setTimeout(() => icon.classList.remove('animate-spin'), 900);
   }
-  const n = lanPeersLive().length + presencePeersLive().size;
+  const n = discoveredPeerCount();
   showToast('已刷新，当前发现 ' + n + ' 个在线实例', 'info');
 }
 
@@ -1749,12 +1753,20 @@ function updateLanNetStatus(text) {
   if (el) el.textContent = text;
 }
 
+// 当前「已发现在线设备」数：两通道合并按识别码去重（用于状态栏与刷新提示）
+function discoveredPeerCount() {
+  const ids = new Set();
+  lanPeersLive().forEach(p => ids.add(p.id));
+  presencePeersLive().forEach(p => ids.add(p.id));
+  return ids.size;
+}
+
 // 已连接 broker 时的状态文案（含实时发现数）
 function refreshLanStatus() {
   if (!lanBrokerOk) return;
-  const n = lanPeersLive().length;
+  const n = discoveredPeerCount();
   const suffix = lanSubnet === 'unknown' ? '（本机IP未暴露，匹配所有未暴露设备）' : '';
-  updateLanNetStatus('局域网发现运行中 · 网段 ' + lanSubnet + suffix + ' · 已发现 ' + n + ' 台设备');
+  updateLanNetStatus('设备发现运行中 · 网段 ' + lanSubnet + suffix + ' · 已发现 ' + n + ' 台设备');
 }
 
 function initLanDiscovery() {
@@ -2013,6 +2025,9 @@ function handlePresencePayload(text) {
       t: Date.now()
     });
     updateFriendOnlineIndicators();
+    // 新设备上线/心跳续期 → LocalSend 列表若正开着就同步刷新
+    const lsMode = document.getElementById('localsendMode');
+    if (lsMode && !lsMode.classList.contains('hidden')) renderLocalsendList();
   } catch (e) { /* 忽略畸形信标 */ }
 }
 
@@ -2049,27 +2064,35 @@ function renderLocalsendList() {
   const hint = document.getElementById('localsendEmptyHint');
   if (!list) return;
 
-  // 合并两源：LAN 信标发现的设备优先（可能同时是好友，合并为一行），其余好友随后
+  // 合并三源（按信令 ID 去重）：
+  // 1) LAN 信标发现的设备（badge 局域网）
+  // 2) 全局 presence 信标发现的设备（badge 在线）——跨网/同网都能看到，
+  //    修复同 WiFi 但 MQTT/公网 MQTT 通道被拦时列表空白的盲区
+  // 3) 其余好友（badge 好友，离线灰）
   const rows = [];
-  const seen = new Set();
-  lanPeersLive().forEach(p => {
-    // 本机排除：识别码相同且信令 ID 也相同（或旧版无 sid）才算自己；
-    // 识别码相同的其他运行实例（同源多标签页）保留为独立行
-    if (p.id === myDeviceId && (!p.sid || p.sid === (devicePeer && devicePeer.id))) return;
-    seen.add(p.id);
-    const f = friends.find(fr => fr.deviceId === p.id);
-    const isSelfAlias = p.id === myDeviceId && !f;
+  const seenSids = new Set();
+  const seenDeviceIds = new Set();
+  const pushRow = (rec, lan) => {
+    if (!rec || !rec.id) return;
+    const key = rec.sid || rec.id;
+    if (seenSids.has(key)) return;
+    seenSids.add(key);
+    seenDeviceIds.add(rec.id);
+    const f = friends.find(fr => fr.deviceId === rec.id);
+    const isSelfAlias = rec.id === myDeviceId && !f;
     rows.push({
-      deviceId: p.id,
+      deviceId: rec.id,
       friendId: f ? f.id : null,
-      name: isSelfAlias ? p.name + '（本机另一窗口）' : (f ? f.name : p.name),
-      lan: true,
-      isFriend: !!f
+      name: isSelfAlias ? rec.name + '（本机另一窗口）' : (f ? f.name : rec.name),
+      lan, isFriend: !!f,
+      online: true // 两条信标通道都是实时心跳记录，出现在列表里即在线
     });
-  });
+  };
+  lanPeersLive().forEach(p => pushRow(p, true));
+  presencePeersLive().forEach(p => pushRow(p, false));
   friends.forEach(f => {
-    if (!f.deviceId || seen.has(f.deviceId)) return;
-    rows.push({ deviceId: f.deviceId, friendId: f.id, name: f.name, lan: false, isFriend: true });
+    if (!f.deviceId || seenDeviceIds.has(f.deviceId)) return;
+    rows.push({ deviceId: f.deviceId, friendId: f.id, name: f.name, lan: false, isFriend: true, online: false });
   });
 
   if (rows.length === 0) {
@@ -2084,17 +2107,21 @@ function renderLocalsendList() {
     const f = friends.find(fr => fr.id === row.friendId);
     const colors = (f && f.avatarColors) || avatarColors[0];
     const initials = (row.name || '?').charAt(0).toUpperCase();
-    const badge = row.lan
-      ? (row.isFriend
-        ? '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网 · 好友</span>'
-        : '<span class="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-xs flex-shrink-0">局域网发现</span>')
-      : '<span class="px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-500 text-xs flex-shrink-0">好友</span>';
+    const badgeCls = row.online ? 'bg-green-500/10 text-green-600' : 'bg-primary-500/10 text-primary-500';
+    const badgeText = row.lan
+      ? (row.isFriend ? '局域网 · 好友' : '局域网发现')
+      : (row.online
+        ? (row.isFriend ? '在线 · 好友' : '在线发现')
+        : '好友');
+    const badge = `<span class="px-2 py-0.5 rounded-full ${badgeCls} text-xs flex-shrink-0">${badgeText}</span>`;
     const busy = localsendDialTarget === row.deviceId;
     const subtext = busy
       ? '正在连接 · 再次点击可取消'
       : (row.lan
         ? (row.isFriend ? '局域网在线 · 点击一键直连' : '局域网在线 · 点击发起连接（对方需确认）')
-        : '点击直连 · 对方在线时立即建立');
+        : (row.online
+          ? (row.isFriend ? '在线 · 点击一键直连' : '在线 · 点击发起连接（对方需确认）')
+          : '点击直连 · 对方在线时立即建立'));
 
     const el = document.createElement('div');
     el.className = 'friend-card glass rounded-2xl p-4 cursor-pointer';
@@ -2105,7 +2132,7 @@ function renderLocalsendList() {
           <div class="friend-avatar w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg font-bold" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
             ${esc(initials)}
           </div>
-          ${row.lan ? '<span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white"></span>' : ''}
+          ${row.online ? '<span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white"></span>' : ''}
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
@@ -3194,6 +3221,17 @@ function setupFileInput() {
     e.target.value = ''; // 允许重复选择同一文件
   });
 
+  // 整个文件夹上传（webkitdirectory）：浏览器把目录内所有文件（含子目录）
+  // 递归列出来，每个 File 都带真实大小，不会再出现「大小 0」
+  const folderInput = document.getElementById('folderInput');
+  if (folderInput) {
+    folderInput.addEventListener('change', () => {
+      const files = folderInput.files;
+      if (files && files.length) handleFiles(files);
+      folderInput.value = '';
+    });
+  }
+
   // 聊天窗口整体作为拖放区
   if (chatPanel) {
     ['dragenter', 'dragover'].forEach(eventName => {
@@ -3209,9 +3247,53 @@ function setupFileInput() {
       });
     });
     chatPanel.addEventListener('drop', (e) => {
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      // webkitGetAsEntry 必须在 drop 事件内同步调用，之后才能 await
+      const entries = [];
+      if (dt.items && dt.items.length) {
+        for (const it of dt.items) {
+          const en = it.webkitGetAsEntry && it.webkitGetAsEntry();
+          if (en) entries.push(en);
+        }
+      }
+      // 拖入里含目录（或只有条目没有现成 File 列表）→ 走递归枚举，
+      // 目录 File 本身 size=0，直接入队就会出现「大小 0」
+      if (entries.some(en => en.isDirectory) || (entries.length && (!dt.files || !dt.files.length))) {
+        collectDroppedEntries(entries).then(files => {
+          if (files.length) handleFiles(files);
+          else showToast('没有可发送的文件（目录可能为空或不可读）', 'warning');
+        });
+        return;
+      }
+      if (dt.files && dt.files.length) handleFiles(dt.files);
     });
   }
+}
+
+// 递归收集拖入的文件/目录（FileEntry.file / DirectoryReader.readEntries）。
+// readEntries 每次最多返回一批（常见 100 条），必须读到返回空才算完毕
+function collectDroppedEntries(entries) {
+  const out = [];
+  const walk = (entry) => new Promise(resolve => {
+    if (!entry) return resolve();
+    if (entry.isFile) {
+      entry.file(f => { out.push(f); resolve(); }, () => resolve());
+      return;
+    }
+    if (!entry.createReader) return resolve();
+    const reader = entry.createReader();
+    const readBatch = () => {
+      reader.readEntries(results => {
+        if (!results.length) return resolve();
+        let chain = Promise.resolve();
+        results.forEach(ch => { chain = chain.then(() => walk(ch)); });
+        chain.then(readBatch); // 同一目录还有下一批
+      }, () => resolve());
+    };
+    readBatch();
+  });
+  return Promise.all(entries.map(walk)).then(() => out);
 }
 
 function handleFiles(files) {
@@ -3220,7 +3302,14 @@ function handleFiles(files) {
     showToast('请先建立连接再发送文件（从好友列表或 LocalSend 发起）', 'warning');
     return;
   }
+  let skippedDirs = 0;
   Array.from(files).forEach(file => {
+    // 目录条目在部分浏览器里表现为 size=0、type=''、无扩展名的 File：
+    // 直接跳过并提示，避免给对方排出一个 0 字节的"文件"
+    if (file.size === 0 && !(file.type || '').trim() && !/\.[^./\\]+$/.test(file.name)) {
+      skippedDirs++;
+      return;
+    }
     const fileItem = {
       id: Date.now() + Math.random(),
       file: file,
@@ -3233,6 +3322,9 @@ function handleFiles(files) {
     };
     s.fileQueue.push(fileItem);
   });
+  if (skippedDirs) {
+    showToast(`已跳过 ${skippedDirs} 个文件夹（浏览器不能直接传输目录，请用「文件夹」按钮整包发送）`, 'warning');
+  }
   renderChat(true);
   // 聊天模式：文件入选后自动排队发送
   if (s.conn && s.conn.open) processSendQueue(s);
@@ -3423,7 +3515,10 @@ function chatItemDeviceChipHtml(dir, s) {
 function buildChatItemEl(entry, s, animate) {
   const item = entry.ref;
   const wrap = document.createElement('div');
-  wrap.className = 'flex items-center gap-2 ' + (entry.dir === 'out' ? 'justify-end order-3' : 'justify-start') + (animate ? ' animate-slide-up' : '');
+  // 注意：wrap 自身绝不能带 order-* —— 在 #chatMessages（flex-col）里
+  // order-3 会把所有「发出」条目排到「收到」之后，覆盖时间顺序
+  // （对方头像块在消息行内部的 order 只是行内三列布局，互不相关）
+  wrap.className = 'flex items-center gap-2 ' + (entry.dir === 'out' ? 'justify-end' : 'justify-start') + (animate ? ' animate-slide-up' : '');
   wrap.dataset.fid = String(entry.id);
   wrap.dataset.status = entry.kind === 'file' ? item.status : 'text';
 
