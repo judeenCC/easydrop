@@ -645,7 +645,7 @@ tailwind.config = {
               </button>
             </div>
 
-            <div id="chatMessages" class="h-[46vh] min-h-[320px] overflow-y-auto flex flex-col gap-3 py-4 px-1">
+            <div id="chatMessages" class="h-[46vh] min-h-[320px] overflow-y-auto overflow-x-hidden flex flex-col gap-3 py-4 px-1">
               <div id="chatEmptyHint" class="m-auto text-center text-slate-400 text-sm py-10">
                 <i class="fas fa-share-nodes text-3xl text-slate-300 block mb-3"></i>
                 连接已建立，拖入文件或发送消息开始传输
@@ -3402,14 +3402,20 @@ function peerDeviceKind(s) {
   return (t === 'mobile' || t === 'desktop') ? t : (SELF_DEVICE_KIND === 'mobile' ? 'desktop' : 'mobile');
 }
 
+// 消息外侧设备图标块（图1新UI）：本端在右、对方在左，蓝色圆角方块。
+// 图标用内嵌 SVG 线性图形（PC=显示器 / 手机）：页面内嵌的 FA 子集没有
+// display / mobile-screen-button 对应字形（仅含 fa-mobile-screen=U+F3CF），
+// 用 SVG 不依赖字体白名单，永不出现"只剩蓝块"的空芯片
+const DEVICE_ICON_SVG = {
+  desktop: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.75" y="4" width="18.5" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></svg>',
+  mobile: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>'
+};
+
 function chatItemDeviceChipHtml(dir, s) {
   const kind = dir === 'out' ? SELF_DEVICE_KIND : peerDeviceKind(s);
-  const icon = kind === 'mobile' ? 'fa-mobile-screen-button' : 'fa-display';
   const name = dir === 'out' ? myDeviceName : (s && s.identity ? s.identity.deviceName : '对方设备');
   return `
-    <div class="${dir === 'out' ? 'order-3' : ''} w-9 h-9 sm:w-10 sm:h-10 bg-primary-500 text-white rounded-xl flex items-center justify-center flex-shrink-0 self-center shadow-sm" title="${esc(name)}">
-      <i class="fas ${icon} text-sm"></i>
-    </div>
+    <div class="${dir === 'out' ? 'order-3' : ''} w-9 h-9 sm:w-10 sm:h-10 bg-primary-500 text-white rounded-xl flex items-center justify-center flex-shrink-0 self-center shadow-sm" title="${esc(name)}">${DEVICE_ICON_SVG[kind] || DEVICE_ICON_SVG.desktop}</div>
   `;
 }
 
@@ -3417,7 +3423,7 @@ function chatItemDeviceChipHtml(dir, s) {
 function buildChatItemEl(entry, s, animate) {
   const item = entry.ref;
   const wrap = document.createElement('div');
-  wrap.className = 'flex items-end gap-2 ' + (entry.dir === 'out' ? 'justify-end order-3' : 'justify-start') + (animate ? ' animate-slide-up' : '');
+  wrap.className = 'flex items-center gap-2 ' + (entry.dir === 'out' ? 'justify-end order-3' : 'justify-start') + (animate ? ' animate-slide-up' : '');
   wrap.dataset.fid = String(entry.id);
   wrap.dataset.status = entry.kind === 'file' ? item.status : 'text';
 
@@ -3427,7 +3433,7 @@ function buildChatItemEl(entry, s, animate) {
       : item.content;
     wrap.innerHTML = `
       ${chatItemDeviceChipHtml(entry.dir, s)}
-      <div class="order-2 max-w-[300px] sm:max-w-[400px] rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-slate-100 text-slate-700 rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
+      <div class="order-2 min-w-0 max-w-[min(400px,85%)] rounded-2xl px-4 py-3 ${entry.dir === 'out' ? 'bg-slate-100 text-slate-700 rounded-br-md' : 'bg-white border border-slate-200 text-slate-700 rounded-bl-md'}">
         <div class="flex items-center justify-between gap-3 mb-1">
           <span class="text-xs ${entry.dir === 'out' ? 'text-slate-400' : 'text-slate-400'}">${esc(item.label || '文本消息')}</span>
           <button type="button" data-copy class="text-xs ${entry.dir === 'out' ? 'text-slate-400 hover:text-primary-500' : 'text-slate-400 hover:text-primary-500'} transition-all flex-shrink-0"><i class="fas fa-copy mr-1"></i>复制</button>
@@ -3474,18 +3480,18 @@ function buildChatItemEl(entry, s, animate) {
 
   wrap.innerHTML = `
     ${chatItemDeviceChipHtml(entry.dir, s)}
-    <div class="order-2 max-w-[400px] sm:max-w-[460px] ${out ? 'bg-slate-100 rounded-2xl rounded-br-md p-3.5' : 'bg-white border border-slate-200 rounded-2xl rounded-bl-md p-3.5'}">
+    <div class="order-2 min-w-0 max-w-[min(460px,85%)] ${out ? 'bg-slate-100 rounded-2xl rounded-br-md p-3.5' : 'bg-white border border-slate-200 rounded-2xl rounded-bl-md p-3.5'}">
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl ${iconInfo.bg} flex items-center justify-center flex-shrink-0">
           <i class="fas ${iconInfo.icon} ${iconInfo.color}"></i>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between mb-1">
-            <p class="text-sm font-medium truncate text-slate-700">${esc(item.name)}</p>
+            <p class="min-w-0 text-sm font-medium text-slate-700 break-all line-clamp-2">${esc(item.name)}</p>
             <span class="text-xs ${statusColor} ml-2 flex-shrink-0" data-status-text>${statusText}</span>
           </div>
-          <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-            <span data-meta>${queueItemMetaHtml(item, metaExtra, !out)}</span>
+          <div class="flex items-center justify-between gap-2 text-xs text-slate-400 mb-1.5 min-w-0 overflow-hidden">
+            <span class="min-w-0 truncate" data-meta>${queueItemMetaHtml(item, metaExtra, !out)}</span>
           </div>
           <div class="h-1.5 bg-slate-200/50 rounded-full overflow-hidden">
             <div class="h-full progress-bar rounded-full transition-all duration-300" style="width: ${progress}%"></div>
