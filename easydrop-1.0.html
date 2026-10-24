@@ -1966,6 +1966,10 @@ function initPresenceBeacon() {
     clearTimeout(guard);
     presenceRetryCount = 0;
     publishPresence();
+    // 连上先补两跳短间隔心跳：对方 1 秒左右就能亮蓝点，而不是等
+    // 起初最长 5 秒的固定心跳（双方同时打开页面时体验尤其明显）
+    setTimeout(() => { if (presenceWs === ws) publishPresence(); }, 400);
+    setTimeout(() => { if (presenceWs === ws) publishPresence(); }, 1200);
     if (presenceTimer) clearInterval(presenceTimer);
     presenceTimer = setInterval(publishPresence, LAN_BEACON_INTERVAL);
     updateFriendOnlineIndicators();
@@ -2013,16 +2017,15 @@ function handlePresencePayload(text) {
     const sid = safeId(msg.sid || msg.id);
     const ownSid = devicePeer && devicePeer.id;
     if (sid === ownSid || (!msg.sid && id === myDeviceId)) return; // 本机自己的心跳
-    if (String(msg.t || 0) < Date.now() - LAN_PEER_TTL) {
-      presencePeers.delete(sid);
-      updateFriendOnlineIndicators();
-      return;
-    }
+    // 活跃度判定一律用本机「接收时刻」记账；发送方的 t 只用于丢弃明显陈旧的
+    // 重放消息（5 分钟）。旧版用 msg.t 与本机时钟比 16 秒新鲜度：设备时钟差
+    // 20 秒就会把对方全部心跳判"过期"——表现为手机端蓝、电脑端永远灰
+    if (String(msg.t || 0) < Date.now() - 300000) return;
     presencePeers.set(sid, {
       id: id,
       name: (typeof msg.name === 'string' ? msg.name : '').slice(0, 40),
       sid: sid,
-      t: Date.now()
+      t: Date.now() // 本机接收时刻：TTL 以此为准，跨设备时钟偏差免疫
     });
     updateFriendOnlineIndicators();
     // 新设备上线/心跳续期 → LocalSend 列表若正开着就同步刷新
@@ -2051,13 +2054,20 @@ function presencePeersLive() {
 
 function schedulePresenceRetry() {
   presenceRetryCount++;
-  if (presenceRetryCount > 6) return; // 总线偶发不可达时静默放弃轮询，不影响传输主流程
   if (presenceRetryTimer) return;
+  // 不再「重试 6 次后放弃」：presence 是在线状态的核心通道，前 6 次
+  // 4 秒快重试，之后 10 秒慢速重试一直保持；疯狂重试没有意义但放弃更糟
+  const wait = presenceRetryCount <= 6 ? 4000 : 10000;
   presenceRetryTimer = setTimeout(() => {
     presenceRetryTimer = null;
     initPresenceBeacon();
-  }, 4000);
+  }, wait);
 }
+
+// 页面重新可见 / 网络恢复时立即尝试重连 presence：电脑休眠唤醒后
+// 几秒内蓝点恢复，而不是等下一个重试周期
+document.addEventListener('visibilitychange', () => { if (!document.hidden) initPresenceBeacon(); });
+window.addEventListener('online', () => { initPresenceBeacon(); });
 
 function renderLocalsendList() {
   const list = document.getElementById('localsendDeviceList');
@@ -3221,13 +3231,16 @@ function setupFileInput() {
     e.target.value = ''; // 允许重复选择同一文件
   });
 
-  // 整个文件夹上传（webkitdirectory）：浏览器把目录内所有文件（含子目录）
-  // 递归列出来，每个 File 都带真实大小，不会再出现「大小 0」
+  // 整个文件夹上传（webkitdirectory）：打包成一个 zip 流整包发送
+  // （对方收到一个 .zip 卡片；需要逐个发文件请用 + 按钮选择具体文件）
   const folderInput = document.getElementById('folderInput');
   if (folderInput) {
     folderInput.addEventListener('change', () => {
-      const files = folderInput.files;
-      if (files && files.length) handleFiles(files);
+      const pairs = Array.from(folderInput.files).map(f => ({ file: f, relPath: f.webkitRelativePath || f.name }));
+      if (pairs.length) {
+        const root = (pairs[0].relPath.split('/')[0]) || '文件夹';
+        queueFolderBundle(pairs, root);
+      }
       folderInput.value = '';
     });
   }
@@ -3257,12 +3270,20 @@ function setupFileInput() {
           if (en) entries.push(en);
         }
       }
-      // 拖入里含目录（或只有条目没有现成 File 列表）→ 走递归枚举，
+      const hasDir = entries.some(en => en.isDirectory);
+      // 拖入里含目录（或只有条目没有现成 File 列表）→ 走递归枚举；
       // 目录 File 本身 size=0，直接入队就会出现「大小 0」
-      if (entries.some(en => en.isDirectory) || (entries.length && (!dt.files || !dt.files.length))) {
-        collectDroppedEntries(entries).then(files => {
-          if (files.length) handleFiles(files);
-          else showToast('没有可发送的文件（目录可能为空或不可读）', 'warning');
+      if (hasDir || (entries.length && (!dt.files || !dt.files.length))) {
+        collectDroppedEntries(entries).then(pairs => {
+          if (!pairs.length) { showToast('没有可发送的文件（目录可能为空或不可读）', 'warning'); return; }
+          if (hasDir) {
+            // 拖入文件夹 → 同样整包成一个 zip（与「文件夹」按钮行为一致）
+            const roots = new Set(pairs.map(p => (p.relPath || p.file.name).split('/')[0]));
+            const title = roots.size === 1 ? [...roots][0] : 'EasyDrop打包';
+            queueFolderBundle(pairs, title);
+          } else {
+            handleFiles(pairs.map(p => p.file));
+          }
         });
         return;
       }
@@ -3271,29 +3292,30 @@ function setupFileInput() {
   }
 }
 
-// 递归收集拖入的文件/目录（FileEntry.file / DirectoryReader.readEntries）。
+// 递归收集拖入的文件/目录，每个文件带 zip 内的相对路径（{file, relPath}）。
 // readEntries 每次最多返回一批（常见 100 条），必须读到返回空才算完毕
 function collectDroppedEntries(entries) {
   const out = [];
-  const walk = (entry) => new Promise(resolve => {
+  const walk = (entry, prefix) => new Promise(resolve => {
     if (!entry) return resolve();
     if (entry.isFile) {
-      entry.file(f => { out.push(f); resolve(); }, () => resolve());
+      entry.file(f => { out.push({ file: f, relPath: prefix + entry.name }); resolve(); }, () => resolve());
       return;
     }
     if (!entry.createReader) return resolve();
     const reader = entry.createReader();
+    const base = prefix + entry.name + '/';
     const readBatch = () => {
       reader.readEntries(results => {
         if (!results.length) return resolve();
         let chain = Promise.resolve();
-        results.forEach(ch => { chain = chain.then(() => walk(ch)); });
+        results.forEach(ch => { chain = chain.then(() => walk(ch, base)); });
         chain.then(readBatch); // 同一目录还有下一批
       }, () => resolve());
     };
     readBatch();
   });
-  return Promise.all(entries.map(walk)).then(() => out);
+  return Promise.all(entries.map(en => walk(en, ''))).then(() => out);
 }
 
 function handleFiles(files) {
@@ -3336,6 +3358,204 @@ function handleChatPaste(ev) {
   if (!files || files.length === 0) return; // 纯文本/富文本粘贴照常
   ev.preventDefault();
   handleFiles(files); // 内部自带「尚未连接」提示与排队发送逻辑
+}
+
+// ==================== 文件夹整包发送（zip / STORE 流式生成） ====================
+// 思路：文件夹不再拆成 N 个独立文件，而是生成一个在磁盘上"虚拟"的 zip：
+// 目录/文件头按 STORE 格式即时拼出（内容不进内存），只逐文件预读算 CRC32。
+// 产物暴露与 File 相同的 size + slice(a,b)->{arrayBuffer()} 接口，
+// 现有发送循环（15KB 分块/背压/进度%）零改动接入；接收端就是一个普通文件。
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function updateCrc32(crc, u8) {
+  let c = crc ^ 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC32_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// zip 条目相对路径清洗：统一 / 分隔、去掉穿越片段（对端解压安全）
+function sanitizeZipRelPath(rel) {
+  return String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '')
+    .split('/').filter(seg => seg && seg !== '.' && seg !== '..').join('/');
+}
+
+function createZipSource(entries, folderTitle) {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
+  const dosDate = (((now.getFullYear() - 1980) & 0x7F) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const meta = entries.map(e => {
+    const n = enc.encode(e.relPath); // zip 内条目名（UTF-8，置 bit11 标志）
+    const local = new Uint8Array(30 + n.length);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true); // local file header 签名
+    dv.setUint16(4, 20, true);         // version needed: 2.0
+    dv.setUint16(6, 0x0800, true);     // flags: 文件名 UTF-8
+    dv.setUint16(8, 0, true);          // method: STORE（不压缩）
+    dv.setUint16(10, dosTime, true);
+    dv.setUint16(12, dosDate, true);
+    dv.setUint32(14, e.crc >>> 0, true);
+    dv.setUint32(18, e.file.size, true);
+    dv.setUint32(22, e.file.size, true);
+    dv.setUint16(26, n.length, true);
+    dv.setUint16(28, 0, true);
+    local.set(n, 30);
+    return { e, n, local };
+  });
+  // 布局：[local header][raw content] × N → central directory → EOCD
+  let off = 0;
+  const segs = meta.map(m => {
+    const seg = { m, localOff: off, contentOff: off + m.local.length, end: off + m.local.length + m.e.file.size };
+    off = seg.end;
+    return seg;
+  });
+  const centralOff = off;
+  const centralParts = [];
+  meta.forEach((m, i) => {
+    const c = new Uint8Array(46 + m.n.length);
+    const dv = new DataView(c.buffer);
+    dv.setUint32(0, 0x02014b50, true); // central dir header 签名
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(8, 0x0800, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, dosTime, true);
+    dv.setUint16(14, dosDate, true);
+    dv.setUint32(16, m.e.crc >>> 0, true);
+    dv.setUint32(20, m.e.file.size, true);
+    dv.setUint32(24, m.e.file.size, true);
+    dv.setUint16(28, m.n.length, true);
+    dv.setUint32(42, segs[i].localOff, true); // 指回 local header
+    c.set(m.n, 46);
+    centralParts.push(c);
+    off += c.length;
+  });
+  const centralSize = off - centralOff;
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true); // EOCD 签名
+  ev.setUint16(8, meta.length, true);
+  ev.setUint16(10, meta.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, centralOff, true);
+  off += eocd.length;
+
+  function readRange(s, e) {
+    const pieces = [];
+    for (const seg of segs) {
+      if (seg.localOff < e && s < seg.contentOff) {
+        pieces.push({ at: Math.max(s, seg.localOff), u8: seg.m.local.subarray(Math.max(s, seg.localOff) - seg.localOff, Math.min(e, seg.contentOff) - seg.localOff) });
+      }
+      if (seg.end > s && seg.contentOff < e) {
+        // at 必须带：内容片段的写入位置。漏写则 out.set(offset=NaN) 被
+        // ToInteger 归 0，文件内容会反复写入缓冲区开头、整包字节全错位
+        // （头部/EOCD 片段写入次序靠后的部分恰好正确，极具迷惑性）
+        const ca = Math.max(s, seg.contentOff);
+        pieces.push({ at: ca, fileSeek: true, seg, a: ca, b: Math.min(e, seg.end) });
+      }
+    }
+    let at = centralOff;
+    for (const c of centralParts.concat([eocd])) {
+      if (at >= e || s >= at + c.length) { at += c.length; continue; }
+      pieces.push({ at: Math.max(s, at), u8: c.subarray(Math.max(s, at) - at, Math.min(e, at + c.length) - at) });
+      at += c.length;
+    }
+    pieces.sort((x, y) => x.at - y.at);
+    let chain = Promise.resolve();
+    for (const p of pieces) {
+      chain = p.fileSeek
+        ? chain.then(() => p.seg.m.e.file.slice(p.a - p.seg.contentOff, p.b - p.seg.contentOff).arrayBuffer().then(buf => { p.u8 = new Uint8Array(buf); p.fileSeek = false; }))
+        : chain;
+    }
+    return chain.then(() => {
+      const out = new Uint8Array(e - s);
+      for (const p of pieces) out.set(p.u8, p.at - s);
+      return out.buffer;
+    });
+  }
+
+  return {
+    size: off,
+    folderTitle: folderTitle,
+    // 与 File 相同的切片接口 → 发送循环零改动
+    slice(start, end) {
+      const s = Math.max(0, Math.min(start | 0, this.size));
+      const e = Math.max(s, Math.min(end | 0, this.size));
+      return { arrayBuffer: () => readRange(s, e) };
+    }
+  };
+}
+
+// 入队一个文件夹整包：pairs=[{file, relPath}]；先快筛大小/算总尺寸，
+// 再异步逐文件预读算 CRC（STORE 要求头里带真 CRC），完成后转 pending 续发
+function queueFolderBundle(pairs, folderTitle) {
+  const s = getActiveSession();
+  if (!s) {
+    showToast('请先建立连接再发送文件（从好友列表或 LocalSend 发起）', 'warning');
+    return;
+  }
+  const enc = new TextEncoder();
+  const clean = [];
+  let total = 22; // EOCD
+  pairs.forEach(p => {
+    if (p.file.size === 0 && !(p.file.type || '').trim() && !/\.[^./\\]+$/.test(p.file.name)) return; // 目录条目防御
+    const rel = sanitizeZipRelPath(p.relPath || p.file.name);
+    if (!rel) return;
+    const nLen = enc.encode(rel).length;
+    total += 76 + 2 * nLen + p.file.size; // 30+n + 内容 + 46+n（条目名在两个目录头各计一次）
+    clean.push({ file: p.file, relPath: rel });
+  });
+  if (!clean.length) { showToast('文件夹里没有可发送的文件', 'warning'); return; }
+  if (total >= 0xFFFFFF00) {
+    showToast('文件夹太大（超过 4 GB，浏览器打包上限），请分批发送', 'warning');
+    return;
+  }
+  const item = {
+    id: Date.now() + Math.random(),
+    name: folderTitle + '.zip',
+    size: total,
+    type: 'application/zip',
+    progress: 0,
+    status: 'packing', // 预读 CRC 期间显示「打包中」
+    addedAt: Date.now(),
+    bundle: { entries: clean, folderTitle, ready: false, source: null }
+  };
+  s.fileQueue.push(item);
+  showToast(`「${folderTitle}」将打包为一个 zip 发送（${clean.length} 个文件）· 需逐个发送请用 + 按钮`, 'info');
+  renderChat(true);
+  buildFolderBundle(item, s);
+}
+
+async function buildFolderBundle(item, s) {
+  try {
+    const STEP = 512 * 1024;
+    for (const en of item.bundle.entries) {
+      let crc = 0;
+      for (let o = 0; o < en.file.size; o += STEP) {
+        const buf = await en.file.slice(o, Math.min(o + STEP, en.file.size)).arrayBuffer();
+        crc = updateCrc32(crc, new Uint8Array(buf));
+      }
+      en.crc = crc >>> 0;
+    }
+    item.bundle.source = createZipSource(item.bundle.entries, item.bundle.folderTitle);
+    item.bundle.ready = true;
+    item.status = 'pending';
+    renderChat(true);
+    if (s) processSendQueue(s); // 连接可用时自动接续发送
+  } catch (e) {
+    console.error('打包失败:', e);
+    item.status = 'failed';
+    showToast('打包失败：' + (e.message || '读取文件出错'), 'error');
+    renderChat(true);
+  }
 }
 
 // 单文件传输通道：每个会话独立一条；上一个发完自动接着发该会话队列中的下一个
@@ -3568,6 +3788,10 @@ function buildChatItemEl(entry, s, animate) {
     actionHtml = out
       ? `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`
       : `<div class="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
+  } else if (item.status === 'packing') {
+    statusText = '打包中...';
+    statusColor = 'text-primary-500';
+    actionHtml = `<div class="w-9 h-9 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-hourglass-half text-primary-500 text-sm"></i></div>`;
   } else {
     statusText = '排队中'; statusColor = 'text-slate-400';
     actionHtml = `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="立即发送"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
@@ -3792,7 +4016,9 @@ async function sendFileOn(s, fileId) {
       fileType: item.type
     });
 
-    const file = item.file;
+    // 文件夹整包：bundle.ready 后 source 与 File 同接口（size/slice）
+    if (item.bundle && !item.bundle.ready) return; // 理论不可达：pending 前置 packing
+    const file = (item.bundle && item.bundle.source) || item.file;
     const t0 = Date.now();
     let offset = 0;
     let frameCount = 0;
