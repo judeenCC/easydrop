@@ -399,7 +399,12 @@ tailwind.config = {
           </div>
           <div class="min-w-0">
             <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-800 leading-tight">EasyDrop</h1>
-            <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
+            <div class="flex items-center gap-1.5">
+              <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
+              <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
+                title="当前版本 v26.10.26-r5 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r5</button>
+            </div>
           </div>
         </div>
 
@@ -2137,29 +2142,28 @@ function renderLocalsendList() {
   const hint = document.getElementById('localsendEmptyHint');
   if (!list) return;
 
-  // 合并三源（按信令 ID 去重）：
+  // 合并三源（同一设备合并为一张卡）：
   // 1) LAN 信标发现的设备（badge 局域网）
-  // 2) 全局 presence 信标发现的设备（badge 在线）——跨网/同网都能看到，
-  //    修复同 WiFi 但 MQTT/公网 MQTT 通道被拦时列表空白的盲区
+  // 2) 全局 presence 信标发现的设备（badge 在线）——跨网/同网都能看到
   // 3) 其余好友（badge 好友，离线灰）
+  // 同设备多实例（多标签页/实例后缀切换）只出一张卡：旧版按 sid 分行会出现
+  // 「两张一样的卡片」；拨号候选列表本就会尝试该识别码的全部实例
   const rows = [];
-  const seenSids = new Set();
   const seenDeviceIds = new Set();
   const pushRow = (rec, lan) => {
     if (!rec || !rec.id) return;
-    const key = rec.sid || rec.id;
-    if (seenSids.has(key)) return;
-    seenSids.add(key);
-    seenDeviceIds.add(rec.id);
     const f = friends.find(fr => fr.deviceId === rec.id);
     const isSelfAlias = rec.id === myDeviceId && !f;
-    rows.push({
-      deviceId: rec.id,
-      friendId: f ? f.id : null,
-      name: isSelfAlias ? rec.name + '（本机另一窗口）' : (f ? f.name : rec.name),
-      lan, isFriend: !!f,
-      online: true // 两条信标通道都是实时心跳记录，出现在列表里即在线
-    });
+    const name = isSelfAlias ? rec.name + '（本机另一窗口）' : (f ? f.name : rec.name);
+    const ts = rec.ts || rec.t || 0;
+    const existing = rows.find(r => r.deviceId === rec.id);
+    if (existing) {
+      if (lan) existing.lan = true; // 局域网徽标优先
+      if (ts > (existing._ts || 0)) { existing._ts = ts; existing.name = name; }
+      return;
+    }
+    seenDeviceIds.add(rec.id);
+    rows.push({ deviceId: rec.id, friendId: f ? f.id : null, name, lan, isFriend: !!f, online: true, _ts: ts });
   };
   lanPeersLive().forEach(p => pushRow(p, true));
   presencePeersLive().forEach(p => pushRow(p, false));
@@ -2474,15 +2478,12 @@ const SIGNALING_HOSTS = [
   },
   null // null = PeerJS 免费云端默认（0.peerjs.com）
 ];
-let signalingIdx = 0;
-try {
-  signalingIdx = Math.min(Number(localStorage.getItem(SIGNALING_KEY)) || 0, SIGNALING_HOSTS.length - 1);
-} catch (e) { signalingIdx = 0; }
+let signalingIdx = 0; // 每次加载一律先尝试自建信令：云端回退只在本次运行有效
+try { localStorage.removeItem(SIGNALING_KEY); } catch (e) { /* noop */ } // 清历史偏好：曾让一次抖动把设备永久锁在旧云端（两端分属不同总线，互拨全部 peer-unavailable）
 let signalingGuardSeq = 0;
 
 function rememberSignaling(idx) {
-  signalingIdx = idx;
-  try { localStorage.setItem(SIGNALING_KEY, String(idx)); } catch (e) { /* noop */ }
+  signalingIdx = idx; // 仅内存，不再写 localStorage：下次加载自动回到自建主信令
 }
 
 function createPeer(peerId, kind) {
@@ -2659,7 +2660,7 @@ function handlePeerError(err, kind, p) {
           console.warn('目标地址未响应，尝试下一个候选信令地址:', dialCandidates[dialCidIdx]);
           break;
         }
-        failFriendDial('对方当前不在线或无法直达，请让对方打开本页面后重试');
+        failFriendDial('对方当前不在线或无法直达；若对方页面显示在线，请双方核对左上角版本号一致后再试');
       } else if (dialingCode) {
         failCodeDial('连接码无效或已过期，请确认后重试');
       } else {
@@ -2876,6 +2877,12 @@ function failCodeDial(msg) {
   clearDialTimeout();
   hideDialBanner();
   showToast(msg, 'error');
+  // 若曾被轮换到旧云端（其拨号转发已被墙），失败即切回自建主信令
+  if (signalingIdx !== 0) {
+    rememberSignaling(0);
+    initializePeer();
+    showToast('已切回主信令通道，请再次发起连接', 'info');
+  }
 }
 
 function failFriendDial(msg) {
@@ -2886,6 +2893,12 @@ function failFriendDial(msg) {
   clearDialTimeout();
   hideDialBanner();
   showToast(msg, 'error');
+  // 同上：一次网络抖动不再把设备永久留在旧云端
+  if (signalingIdx !== 0) {
+    rememberSignaling(0);
+    initializePeer();
+    showToast('已切回主信令通道，请再次发起连接', 'info');
+  }
 }
 
 // 清理拨号状态（不关闭连接）；LocalSend 行内转圈随之复位
