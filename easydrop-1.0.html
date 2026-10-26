@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r7 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r7</button>
+                title="当前版本 v26.10.26-r8 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r8</button>
             </div>
           </div>
         </div>
@@ -3217,6 +3217,7 @@ function createSession(conn, opts) {
     closed: false
   };
   sessions.set(s.key, s);
+  restoreChatHistory(s); // 回填与该设备的历史聊天记录（刷新/重连后仍在）
   // 拨号状态复位：仅本端主动发起或用户确认过的会话才清理拨号横幅/状态；
   // 静默接受的入站会话（好友免确认直连）不抢走正在进行的拨号
   if (s.isInitiator || s.userConfirm) {
@@ -3288,6 +3289,26 @@ function onSessionConnClosed(s) {
     : (midSend ? '，已发送 ' + formatFileSize(midSend.sentBytes || 0) + '/' + formatFileSize(midSend.size) : '');
   showToast('与 ' + sessionDisplayName(s) + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' + detail : ''), 'warning');
   closeSession(s);
+  maybeAutoReconnect(s); // 意外断开且对方仍在线 → 自动重拨一次
+}
+
+// 非用户主动挂断的意外断开（conn close 事件）：对方 presence 仍有心跳时
+// 2 秒后自动重拨一次（每设备 20 秒限频，防止网络抖动时反复重拨）
+const autoReconnectLast = new Map();
+function maybeAutoReconnect(s) {
+  const code = sessionDeviceCode(s);
+  if (!code || !isDeviceIdSeenLive(code)) return; // 对方已离线：不空拨
+  const now = Date.now();
+  if (now - (autoReconnectLast.get(code) || 0) < 20000) return;
+  autoReconnectLast.set(code, now);
+  showToast('连接中断，2 秒后自动尝试重连…', 'info');
+  setTimeout(() => {
+    const existing = findSessionByDeviceId(code);
+    if (existing && isSessionAlive(existing)) return; // 期间已恢复，不重复拨
+    const f = friends.find(fr => fr.deviceId === code);
+    if (f) connectToFriend(f.id, null);
+    else dialDevice(code, 'reconnect');
+  }, 2000);
 }
 
 // ==================== Frame Protocol ====================
@@ -4042,9 +4063,14 @@ function buildChatItemEl(entry, s, animate) {
     statusText = out ? '已发送' : '已接收';
     statusColor = 'text-green-500';
     metaExtra = avgTransferMeta(item);
+    // 历史回填的接收文件没有本地 blob（文件本体不入库存档），
+    // 不展示可点下载按钮，避免点了没反应；仅作记录展示并标「历史」
+    const noBlob = !out && item.history && !item.blob;
     actionHtml = out
       ? `<div class="w-9 h-9 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`
-      : `<button type="button" data-dl="1" class="w-9 h-9 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0" title="下载"><i class="fas fa-download text-accent-500 text-sm"></i></button>`;
+      : (noBlob
+        ? `<span class="text-xs text-slate-300 flex-shrink-0 px-1" title="历史记录（文件本体未随记录保存）">历史</span>`
+        : `<button type="button" data-dl="1" class="w-9 h-9 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0" title="下载"><i class="fas fa-download text-accent-500 text-sm"></i></button>`);
   } else if (item.status === 'failed') {
     statusText = out ? '发送失败' : '接收失败';
     statusColor = 'text-red-500';
@@ -4089,6 +4115,68 @@ function buildChatItemEl(entry, s, animate) {
   const retryBtn = wrap.querySelector('button[data-retry]');
   if (retryBtn) retryBtn.onclick = () => sendFile(item.id);
   return wrap;
+}
+
+// ==================== 会话历史持久化（每端设备独立存档） ====================
+// 诉求：刷新页面/断开重连后，会话窗口仍能保留与该设备的聊天记录。
+// 文本消息与文件元信息存 localStorage（文件本体不入库——收到过的文件若已
+// 下载则仍在本地；未下载的历史文件卡片仅作记录展示、标记「历史」不可再点下载）。
+const CHAT_HISTORY_KEY = 'easydrop_chat_history_v1';
+const CHAT_HISTORY_PER_PEER = 120;
+let chatHistoryStore = null;
+
+function chatHistoryLoad() {
+  if (chatHistoryStore) return chatHistoryStore;
+  chatHistoryStore = {};
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) chatHistoryStore = obj;
+  } catch (e) { chatHistoryStore = {}; }
+  return chatHistoryStore;
+}
+
+function chatHistorySave() {
+  try { localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistoryStore)); }
+  catch (e) {
+    // 配额满：每端砍到 40 条再试；仍失败则放弃持久化（不影响使用）
+    try {
+      Object.keys(chatHistoryStore).forEach(k => { chatHistoryStore[k] = chatHistoryStore[k].slice(-40); });
+      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistoryStore));
+    } catch (e2) { /* noop */ }
+  }
+}
+
+function chatHistoryAppend(s, entry) {
+  const code = sessionDeviceCode(s);
+  if (!code) return;
+  const store = chatHistoryLoad();
+  const arr = store[code] || (store[code] = []);
+  arr.push(entry);
+  if (arr.length > CHAT_HISTORY_PER_PEER) arr.splice(0, arr.length - CHAT_HISTORY_PER_PEER);
+  chatHistorySave();
+}
+
+function chatHistoryFor(s) {
+  const code = sessionDeviceCode(s);
+  if (!code) return [];
+  return (chatHistoryLoad()[code] || []).slice();
+}
+
+// 建会话时回填该设备的历史消息（只回填一次；实时新增另行追加，不重复）
+function restoreChatHistory(s) {
+  if (s._historyRestored) return;
+  s._historyRestored = true;
+  chatHistoryFor(s).forEach(e => {
+    if (!e || !e.kind) return;
+    if (e.kind === 'text') {
+      s.chatTexts.push({ id: e.id, dir: e.dir, label: e.label || '文本消息', content: e.content, addedAt: e.addedAt || Date.now() });
+    } else if (e.dir === 'out') {
+      s.fileQueue.push({ id: e.id, name: e.name, size: e.size, type: e.type, status: 'sent', progress: 100, addedAt: e.addedAt || Date.now(), history: true });
+    } else {
+      s.receivedFiles.push({ id: e.id, name: e.name, size: e.size, type: e.type, status: 'received', progress: 100, receivedBytes: e.size, addedAt: e.addedAt || Date.now(), history: true, blob: null });
+    }
+  });
 }
 
 // 渲染节流：大文件传输中不再每个分块都重建整个列表 DOM
@@ -4318,6 +4406,7 @@ async function sendFileOn(s, fileId) {
     item.progress = 100;
     item.totalMs = Date.now() - t0;
     renderFileQueue(true);
+    chatHistoryAppend(s, { id: item.id, dir: 'out', kind: 'file', name: item.name, size: item.size, type: item.type, addedAt: item.addedAt || Date.now() });
     showToast(`文件 "${item.name}" 已发送（${formatSpeed(file.size / (item.totalMs / 1000))}）`, 'success');
     updateFriendTransferByRemote(s);
     addHistoryEntry({ dir: 'out', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s), code: sessionDeviceCode(s) });
@@ -4360,7 +4449,14 @@ function isChatNotViewed(s) {
 // ==================== Send Text ====================
 // 发送的文本进入会话消息流（靠右气泡），与收到的文本（靠左）共用时间线
 function pushChatText(s, dir, label, content) {
-  s.chatTexts.push({ id: 't' + Date.now() + Math.random(), dir, label, content, addedAt: Date.now() });
+  const entry = { id: 't' + Date.now() + Math.random(), dir, label, content, addedAt: Date.now() };
+  s.chatTexts.push(entry);
+  // 持久化到该设备的历史存档（超长文本只留前 6000 字，保护 localStorage 配额）
+  chatHistoryAppend(s, {
+    id: entry.id, dir: entry.dir, kind: 'text', label: entry.label,
+    content: String(content).length > 6000 ? String(content).slice(0, 6000) + '\n…（历史已截断）' : content,
+    addedAt: entry.addedAt
+  });
   // 非当前展示的会话收到新内容 → 未读计数 + tab 徽标
   if (isChatNotViewed(s)) {
     s.unread = (s.unread || 0) + 1;
@@ -4508,6 +4604,7 @@ function finishReceive(s, msg) {
     item.progress = 100;
     item.totalMs = Date.now() - (item._t0 || Date.now());
     saveReceivedBlob(item); // 已授权目录则直接写入，否则走浏览器下载
+    chatHistoryAppend(s, { id: item.id, dir: 'in', kind: 'file', name: item.name, size: item.size, type: item.type, addedAt: item.addedAt || Date.now() });
     updateFriendTransferByRemote(s);
     addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s), code: sessionDeviceCode(s) });
   } else {
