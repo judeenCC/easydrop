@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r6 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r6</button>
+                title="当前版本 v26.10.26-r7 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r7</button>
             </div>
           </div>
         </div>
@@ -968,8 +968,11 @@ const PEER_PREFIX_DEV = 'easydrop-dev-';     // 稳定设备 ID 前缀（好友�
 const PEER_PREFIX_CODE = 'easydrop-code-';   // 6 位连接码会话 ID 前缀
 const FRAME_CONTROL = 0x01;                  // 控制帧（JSON，UTF-8）
 const FRAME_DATA = 0x02;                     // 文件数据帧（原始字节）
-const CHUNK_SIZE = 15 * 1024;                // 单帧文件负载，刻意低于 PeerJS 内部 16300 分片阈值
-const HIGH_WATER = 1024 * 1024;              // 发送缓冲高水位（暂停写入）
+const CHUNK_SIZE = 12 * 1024;                // 单帧文件负载。刻意小于 PeerJS 内部 16300 分片阈值；
+                                             // 更小的 SCTP 报文 = 更少的 UDP 分片，弱网/运营商
+                                             // 网络下大文件传输更不容易中途关联崩溃
+const HIGH_WATER = 512 * 1024;               // 发送缓冲高水位（暂停写入）。弱网/高丢包下
+                                             // 水位越低，SCTP 重传积压越少、关联越不易崩
 const LOW_WATER = 256 * 1024;                // 恢复写入水位
 const TEXT_PART_CHARS = 4000;                // 长文本按码点分片，避免超大控制帧
 
@@ -3279,7 +3282,11 @@ function onSessionConnClosed(s) {
   const midSend = s.currentTransfer;
   if (midReceive) midReceive.status = 'failed';
   if (midSend) midSend.status = 'failed';
-  showToast('与 ' + sessionDisplayName(s) + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' : ''), 'warning');
+  // 中断时带上已收/已发字节数：一眼区分「网络中途崩」与「打包/校验错」
+  const detail = midReceive
+    ? '，已接收 ' + formatFileSize(midReceive.receivedBytes || 0) + '/' + formatFileSize(midReceive.size)
+    : (midSend ? '，已发送 ' + formatFileSize(midSend.sentBytes || 0) + '/' + formatFileSize(midSend.size) : '');
+  showToast('与 ' + sessionDisplayName(s) + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' + detail : ''), 'warning');
   closeSession(s);
 }
 
@@ -3299,6 +3306,9 @@ function sendControl(s, obj) {
 
 function handleFrame(data, s) {
   if (!s) return;
+  // 任何入站帧都是对端活跃的铁证：大文件传输期 pong 可能因拥塞延迟，
+  // 但数据一直在到 = 对端活着。否则健康巡检会误杀正在进行的传输
+  s.lastPong = Date.now();
   if (typeof data === 'string') {
     // 兼容路径：旧版本发来的字符串控制消息
     try {
@@ -4316,7 +4326,7 @@ async function sendFileOn(s, fileId) {
     item.status = 'failed';
     try { sendControl(s, { type: 'file-abort', id: item.id }); } catch (e) { /* noop */ }
     renderFileQueue(true);
-    showToast('发送失败：' + (error.message || '连接中断'), 'error');
+    showToast('发送失败：' + (error.message || '连接中断') + '（已发送 ' + formatFileSize(item.sentBytes || 0) + '/' + formatFileSize(item.size) + '）', 'error');
   } finally {
     stopRenderHeartbeat(item);
     s.currentTransfer = null;
