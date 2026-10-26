@@ -2392,14 +2392,61 @@ function updateTimerDisplay() {
 }
 
 // ==================== PeerJS Management ====================
+// ==================== PeerJS 信令服务选择 ====================
+// 自建信令走 Cloudflare DO 总线（与 presence 发现总线同一域名）：第三方
+// 0.peerjs.com 免费云端的拨号转发（offer 中继路径）在国内网络下经常被阻断，
+// 表现为「双方都在线、拨号却 20 秒超时」（连不存在的 ID 都不报 peer-unavailable
+// 而是静默挂死）。自建通道与页面同源，可达性与 presence 完全一致；
+// 自建失联时自动回退云端，并把成功偏好存 localStorage 下次优先。
+const SIGNALING_KEY = 'easydrop_signaling_idx';
+const SIGNALING_HOSTS = [
+  {
+    // 生产 pages.dev 用同源；本地调试（http/127.0.0.1）落到固定线上地址
+    host: (location.hostname && location.hostname.endsWith('.pages.dev')) ? location.hostname : 'easydrop-ady.pages.dev',
+    port: 443,
+    path: '/easydrop-peerjs/',
+    key: 'peerjs',
+    secure: true
+  },
+  null // null = PeerJS 免费云端默认（0.peerjs.com）
+];
+let signalingIdx = 0;
+try {
+  signalingIdx = Math.min(Number(localStorage.getItem(SIGNALING_KEY)) || 0, SIGNALING_HOSTS.length - 1);
+} catch (e) { signalingIdx = 0; }
+let signalingGuardSeq = 0;
+
+function rememberSignaling(idx) {
+  signalingIdx = idx;
+  try { localStorage.setItem(SIGNALING_KEY, String(idx)); } catch (e) { /* noop */ }
+}
+
 function createPeer(peerId, kind) {
-  const p = new Peer(peerId || undefined, {
+  const opt = SIGNALING_HOSTS[signalingIdx];
+  const p = new Peer(peerId || undefined, Object.assign({
     config: { iceServers: getIceServers() }
-  });
+  }, opt || {}));
   p.__kind = kind; // 标记用途，供重置逻辑判断是否复用
 
+  // 注册超时守卫：信令通道不可达（10 秒未 open）→ 轮换到下一个信令服务重建。
+  // 正常自建信令 1 秒内 open；此守卫只兜底网络/部署异常，不干扰正常流程
+  const openGuard = setTimeout(() => {
+    if (p.destroyed || p.open) return;
+    if (signalingIdx < SIGNALING_HOSTS.length - 1) {
+      console.warn('信令服务未就绪（10s 未注册），切换备用信令通道重试');
+      rememberSignaling(signalingIdx + 1);
+      try { p.destroy(); } catch (e) { /* noop */ }
+      if (kind === 'device' && (!devicePeer || devicePeer === p)) {
+        devicePeer = createPeer(devicePeerId(), 'device');
+      } else if (kind === 'code' && sessionCode && (!codePeer || codePeer === p)) {
+        codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
+      }
+    }
+  }, 10000);
+
   p.on('open', (id) => {
-    console.log('PeerJS 已就绪 (' + kind + '):', id);
+    clearTimeout(openGuard);
+    console.log('PeerJS 已就绪 (' + kind + '):', id, opt ? ('信令=' + opt.host) : '信令=0.peerjs.com');
     // 设备 ID 注册成功即复位失败计数，否则累计 3 次后会永久降级为临时 ID
     if (kind === 'device') stableIdRetry = 0;
     updateConnectionStatus();
@@ -2520,6 +2567,21 @@ function initializePeer() {
 
 function handlePeerError(err, kind, p) {
   console.error('PeerJS error:', err.type, err);
+  // 注册尚未完成时信令通道就断死（连不上/云端异常）→ 轮换备用信令重建。
+  // unavailable-id 不轮换：那是同 ID 多实例的正常语义（客户端自动换后缀重试）
+  if (p && !p.open && !p.destroyed && signalingIdx < SIGNALING_HOSTS.length - 1 &&
+      (err.type === 'network' || err.type === 'server-error' ||
+       err.type === 'socket-error' || err.type === 'socket-closed')) {
+    console.warn('信令通道在注册前断死，切换备用信令:', err.type);
+    rememberSignaling(signalingIdx + 1);
+    try { p.destroy(); } catch (e) { /* noop */ }
+    if (kind === 'device' && (!devicePeer || devicePeer === p)) {
+      devicePeer = createPeer(devicePeerId(), 'device');
+    } else if (kind === 'code' && sessionCode && (!codePeer || codePeer === p)) {
+      codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
+    }
+    return;
+  }
   switch (err.type) {
     case 'peer-unavailable':
       if (dialingFriend) {
