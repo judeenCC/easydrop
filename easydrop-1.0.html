@@ -1074,8 +1074,10 @@ function ensureIdentity() {
 }
 
 // ==================== ICE Servers ====================
-// Cloudflare STUN 排最前：Google STUN 在国内常被阻断，拿不到 srflx 候选会导致
-// 双方只用 mDNS 主机候选、跨网/部分路由器环境 ICE 全部失败 → 表现为拨号永远转圈
+// 同网直连用主机候选即可；跨网（如手机流量 ↔ 电脑宽带）必须靠 srflx/relay：
+// STUN 拿公网映射候选，直连打不通时 TURN 中继是唯一通路。国内网络下
+// Google STUN 被墙（纯浪费 ICE 时间），补腾讯/小米公网 STUN；运营商 CGNAT
+// 对 UDP 限制严，TURN 加 TCP 传输（443 通道最接近普通 HTTPS 流量、最易放行）
 function getIceServers() {
   const servers = [];
   try {
@@ -1083,11 +1085,14 @@ function getIceServers() {
     if (customStun) servers.push({ urls: customStun });
   } catch (e) { /* ignore */ }
   servers.push({ urls: 'stun:stun.cloudflare.com:3478' });
-  servers.push({ urls: 'stun:stun.l.google.com:19302' });
-  servers.push({ urls: 'stun:stun1.l.google.com:19302' });
-  // TURN 中继兜底：双方处于严格 NAT / 跨运营商网络导致直连失败时仍可建立连接
-  servers.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
+  servers.push({ urls: 'stun:stun.qq.com:3478' });      // 腾讯公网 STUN，国内稳定
+  servers.push({ urls: 'stun:stun.miwifi.com:3478' });   // 小米公网 STUN，国内稳定
+  // TURN 中继兜底：跨网/严格 NAT/运营商 CGNAT 场景，直连失败时仍可建立连接。
+  // TCP 传输比 UDP 穿透力强得多（实测跨运营商场景常只有 TCP TURN 能通）
+  servers.push({ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
+  servers.push({ urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
   servers.push({ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
+  servers.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
   return servers;
 }
 
@@ -1433,9 +1438,15 @@ async function connectToFriend(friendId, from = null) {
 
   const existingSession = findSessionByDeviceId(friend.deviceId);
   if (existingSession) {
-    setActiveSession(existingSession.key);
-    switchTab('chat');
-    return;
+    // 网络切换后 ICE 常停在 disconnected 不触发 close → 会话僵尸化
+    // （点进去看着"已连接"但什么都发不出去）。死通道当场清掉、走重新拨号
+    if (!existingSession.conn || !existingSession.conn.open) {
+      closeSession(existingSession);
+    } else {
+      setActiveSession(existingSession.key);
+      switchTab('chat');
+      return;
+    }
   }
   if (dialActive || dialingFriend || dialingCode) {
     showToast('有连接请求正在处理，请先取消', 'warning');
@@ -1802,7 +1813,17 @@ function handleLanBeaconPayload(text) {
   } catch (e) { /* 忽略畸形信标 */ }
 }
 
+// 强制重置自建发现总线连接（网络切换用）：旧网上的 socket 常半死不报
+// onclose，不主动关就永远无法重连；且子网变了必须换房间重新订阅
+function resetLanBus() {
+  try {
+    if (lanWs) { const old = lanWs; lanWs = null; old.onclose = null; old.close(); }
+  } catch (e) { /* noop */ }
+  if (lanWsTimer) { clearInterval(lanWsTimer); lanWsTimer = null; }
+}
+
 function tryLanWsBus() {
+  if (lanWs && (lanWs.readyState === WebSocket.OPEN || lanWs.readyState === WebSocket.CONNECTING)) return;
   updateLanNetStatus('局域网发现连接中（自建总线）...');
   let ws;
   try {
@@ -2066,7 +2087,44 @@ function schedulePresenceRetry() {
 
 // 页面重新可见 / 网络恢复时立即尝试重连 presence：电脑休眠唤醒后
 // 几秒内蓝点恢复，而不是等下一个重试周期
-document.addEventListener('visibilitychange', () => { if (!document.hidden) initPresenceBeacon(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    initPresenceBeacon();
+    sweepDeadSessions(); // 回前台时巡检：后台期间网络可能切换过，僵尸会话当场清掉
+  }
+});
+
+// 网络环境切换（WiFi↔流量）主动自愈：本机 IP 一变，P2P 通道必然失效；
+// 更隐蔽的是信令 socket 可能半死（TCP 不发 FIN，页面永远不知道自己已掉线，
+// 还以注册态自居，实际服务器早已按失活清退）。监听网络类型切换，当场
+// 重建信令注册与发现总线；有活跃会话时先优雅收尾（比等 ICE 超时快得多）。
+// effectiveType 信号强度波动（3g↔4g 抖动）不触发，只有 wifi/cellular 真切换才动
+let lastNetType = (navigator.connection && navigator.connection.type) || '';
+function handleNetworkStackChange() {
+  const con = navigator.connection || {};
+  const t = con.type || '';
+  if (t === lastNetType) return; // 信号波动不是切网
+  const prev = lastNetType;
+  lastNetType = t;
+  console.warn('网络环境切换(' + (prev || '?') + '→' + (t || '?') + ')，重建信令与发现');
+  const hasLive = Array.from(sessions.values()).some(x => x.conn && x.conn.open);
+  if (hasLive) sessions.forEach(s => closeSession(s)); // 本机 IP 已变，通道必死，主动收尾
+  initializePeer();
+  initPresenceBeacon();
+  resetLanBus();
+  updateLanIpDisplay().then(() => initLanDiscovery());
+  sweepDeadSessions();
+}
+if (navigator.connection && navigator.connection.addEventListener) {
+  navigator.connection.addEventListener('change', handleNetworkStackChange);
+}
+window.addEventListener('online', () => {
+  initPresenceBeacon();
+  sweepDeadSessions();
+  // 无活跃会话时顺带重建信令（offline 期间 socket 可能已半死而页面不知情）
+  const hasLive = Array.from(sessions.values()).some(x => x.conn && x.conn.open);
+  if (!hasLive && devicePeer && !devicePeer.open) initializePeer();
+});
 window.addEventListener('online', () => { initPresenceBeacon(); });
 
 function renderLocalsendList() {
@@ -2160,6 +2218,7 @@ function renderLocalsendList() {
 }
 
 function openLocalSend() {
+  sweepDeadSessions(); // 打开列表先清死会话：僵尸会话会让点击「跳死会话」而不是拨号
   renderLocalsendList();
   renderDeviceAddress();
   switchTab('localsend');
@@ -2471,9 +2530,14 @@ function createPeer(peerId, kind) {
 // 标准交互，避免好友链路被静默占用）；多个请求依次排队。
 function handleIncomingConnection(conn, kind) {
   if (sessions.has(conn.peer)) {
-    // 同一 peerId 的重复连接（旧连接复用 ID），拒绝一条避免串流
-    try { conn.close(); } catch (e) { /* noop */ }
-    return;
+    const old = sessions.get(conn.peer);
+    if (old && old.conn && old.conn.open) {
+      // 同一 peerId 的重复连接（旧连接复用 ID），且旧会话还活着 → 拒一条避免串流
+      try { conn.close(); } catch (e) { /* noop */ }
+      return;
+    }
+    // 旧会话已死（网络切换后重拨）：清掉接收新连接
+    closeSession(old);
   }
   // 自连接兜底：信令 ID 环回（理论上拨号侧已排除本实例）
   if (devicePeer && conn.peer === devicePeer.id) {
@@ -2988,12 +3052,15 @@ function onLocalsendRowClick(row) {
     showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
-  // 已有该设备的会话：直接切到聊天
+  // 已有该设备的会话：活的直接切到聊天；死的（网络切换僵尸化）清掉重拨
   const existingSession = findSessionByDeviceId(row.deviceId);
   if (existingSession) {
-    setActiveSession(existingSession.key);
-    switchTab('chat');
-    return;
+    if (existingSession.conn && existingSession.conn.open) {
+      setActiveSession(existingSession.key);
+      switchTab('chat');
+      return;
+    }
+    closeSession(existingSession);
   }
   if (row.friendId) connectToFriend(row.friendId, 'localsend');
   else dialDevice(row.deviceId, 'localsend');
@@ -3010,6 +3077,13 @@ function startCodeSessionWithConn(conn) {
 
 function createSession(conn, opts) {
   opts = opts || {};
+  // 同 key 旧会话若已死（网络切换后 ICE 常停在 disconnected、不触发 close），
+  // 先清掉再挂新会话——否则僵尸会话占位：点击直连直接跳进死会话、
+  // 对方重拨入也会被「已有会话」挡掉
+  const oldSameKey = sessions.get(String(conn.peer));
+  if (oldSameKey && (!oldSameKey.conn || !oldSameKey.conn.open)) {
+    closeSession(oldSameKey);
+  }
   const s = {
     key: String(conn.peer),
     conn: conn,
@@ -3028,6 +3102,7 @@ function createSession(conn, opts) {
     receivedBytes: 0,
     textAssembly: {},
     unread: 0,
+    created: Date.now(),
     closed: false
   };
   sessions.set(s.key, s);
@@ -4405,15 +4480,31 @@ function closeSession(s) {
   if (currentTab === 'chat') renderChat(true);
 }
 
+// 会话健康巡检：网络切换（WiFi↔流量）后 ICE 常停在 disconnected 且不触发
+// close，会话会一直挂着"已连接"的假象（纸飞机/LocalSend 点击直接跳进死会话、
+// 对方重拨入也会被挡）。在关键交互与定期巡检时清掉死会话；新建会话留 15 秒
+// 握手宽限（入站连接在确认弹窗期间 conn 尚未 open，不能误杀）
+function sweepDeadSessions() {
+  sessions.forEach(s => {
+    if (s.closed) return;
+    if (!s.conn || !s.conn.open) {
+      if (Date.now() - (s.created || 0) > 15000) {
+        console.warn('清理失活会话:', s.key);
+        closeSession(s);
+      }
+    }
+  });
+}
+
 function updateConnectionStatus() {
-  const isConnected = hasActiveSessions();
-  document.body.classList.toggle('is-connected', isConnected);
+  // 状态点只统计通道真正打开的会话（僵尸会话不再显示"已连接"误导用户）
+  const liveCount = Array.from(sessions.values()).filter(x => x.conn && x.conn.open).length;
   const statusEl = document.getElementById('connectionStatus');
   if (!statusEl) return;
-  if (isConnected) {
+  if (liveCount > 0) {
     statusEl.innerHTML = `
       <span class="status-dot bg-green-500 text-green-500"></span>
-      <span class="text-slate-500">已连接${sessions.size > 1 ? ' · ' + sessions.size + ' 个' : ''}</span>
+      <span class="text-slate-500">已连接${liveCount > 1 ? ' · ' + liveCount + ' 个' : ''}</span>
     `;
   } else {
     statusEl.innerHTML = `
@@ -4721,6 +4812,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSessionChips();
   // LocalSend 列表定期刷新：TTL 过期的设备离线消失，状态行的发现数同步
   setInterval(() => {
+    sweepDeadSessions(); // 网络切换后的僵尸会话 15 秒宽限期一过即自动清掉
+    updateConnectionStatus();
     const mode = document.getElementById('localsendMode');
     if (mode && !mode.classList.contains('hidden')) {
       renderLocalsendList();
