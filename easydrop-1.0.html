@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r5 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r5</button>
+                title="当前版本 v26.10.26-r6 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r6</button>
             </div>
           </div>
         </div>
@@ -869,6 +869,11 @@ tailwind.config = {
         <p class="text-xs text-slate-400 mt-1">用于 NAT 穿透，支持不同网络环境下的连接</p>
       </div>
       <div>
+        <button type="button" id="iceDiagBtn" onclick="runIceDiagnostics()" class="w-full py-2.5 rounded-xl glass hover:bg-slate-100 text-sm text-primary-600 font-medium">运行连接诊断（检测 WebRTC 打洞能力）</button>
+        <div id="iceDiagResult" class="hidden mt-2 p-3 bg-slate-50 rounded-xl border border-slate-200 max-h-56 overflow-y-auto"></div>
+        <p class="text-xs text-slate-400 mt-1">连不上对方时，两台设备各跑一次此诊断，把结果文本发出来</p>
+      </div>
+      <div>
         <label class="text-sm text-slate-500 mb-2 block">下载目录</label>
         <div class="flex items-center gap-2">
           <input type="text" id="downloadDirDisplay" value="浏览器默认下载" disabled class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 text-slate-400">
@@ -1099,6 +1104,81 @@ function getIceServers() {
   servers.push({ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
   servers.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
   return servers;
+}
+
+// ==================== ICE 诊断（设置面板「运行连接诊断」） ====================
+// 采集本机候选并给出判词。分别跑「无服务器」与「全量配置」：
+// - 无服务器也为零 → 浏览器层禁用了 WebRTC（隐私策略/插件）
+// - 有主机候选但无 srflx → STUN 不可达（影响跨网直连）
+// - relay 有无 → TURN 中继可用性（跨网严格 NAT 的兜底）
+async function iceProbe(iceServers, timeoutMs) {
+  const res = { host: 0, srflx: 0, relay: 0, prflx: 0, errors: [], gathering: '', candidates: [] };
+  if (typeof RTCPeerConnection === 'undefined') { res.unsupported = true; return res; }
+  const pc = new RTCPeerConnection({ iceServers: iceServers || [] });
+  pc.createDataChannel('probe');
+  pc.onicecandidate = ev => {
+    if (!ev.candidate) return;
+    const c = ev.candidate;
+    res.candidates.push(c.candidate + ' [' + c.type + '/' + c.protocol + ']');
+    if (c.type === 'host') res.host++;
+    else if (c.type === 'srflx') res.srflx++;
+    else if (c.type === 'relay') res.relay++;
+    else if (c.type === 'prflx') res.prflx++;
+  };
+  pc.onicecandidateerror = ev => { res.errors.push(String(ev.errorCode || ev.errorText || 'ice-err')); };
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+  } catch (e) { res.errors.push('createOffer/setLocal: ' + e.message); }
+  const t0 = Date.now();
+  await new Promise(r => {
+    const t = setInterval(() => {
+      if (pc.iceGatheringState === 'complete' || Date.now() - t0 > timeoutMs) { clearInterval(t); r(); }
+    }, 300);
+  });
+  res.gathering = pc.iceGatheringState;
+  res.ms = Date.now() - t0;
+  try { pc.close(); } catch (e) { /* noop */ }
+  return res;
+}
+
+async function runIceDiagnostics() {
+  const box = document.getElementById('iceDiagResult');
+  const btn = document.getElementById('iceDiagBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '诊断中（约 20 秒）...'; }
+  if (box) {
+    box.classList.remove('hidden');
+    box.innerHTML = '<p class="text-xs text-slate-400">正在采集本机网络候选（检测 WebRTC 打洞能力）...</p>';
+  }
+  try {
+    const hostOnly = await iceProbe([], 7000);
+    const full = await iceProbe(getIceServers(), 12000);
+    const v = [];
+    const anyHostOnly = hostOnly.host + hostOnly.srflx + hostOnly.relay;
+    if (hostOnly.unsupported) {
+      v.push('❌ 当前浏览器不支持 WebRTC，请换最新版 Chrome / Edge');
+    } else if (anyHostOnly === 0) {
+      v.push('❌ 浏览器没有产出任何主机候选：WebRTC 被隐私策略/插件禁用或削弱。请检查：\n' +
+        '· 【最常见】你正在 OpenCode 等 Electron 内嵌 WebView 里使用本应用——请改用系统浏览器（Chrome / Edge）打开本页，内嵌 WebView 的 WebRTC 常被禁用\n' +
+        '· Brave：设置 → 隐私和安全 → WebRTC IP 处理策略 → 选「默认到公共和私有地址」，并临时关闭本站 Shields\n' +
+        '· 隐私插件（WebRTC Leak Prevent / WebRTC Control / 广告拦截的 WebRTC 防护）\n' +
+        '· 企业/校园策略限制、系统级 VPN/代理拦截');
+    } else {
+      v.push('✅ 主机候选 ' + hostOnly.host + ' 个（WebRTC 基本功能正常）');
+    }
+    if (full.srflx > 0) v.push('✅ STUN 可用（公网映射候选 ' + full.srflx + ' 个）');
+    else v.push('⚠️ STUN 未产出公网映射候选：跨网直连可能失败（同网一般不受影响）');
+    if (full.relay > 0) v.push('✅ TURN 中继可用（' + full.relay + ' 个中继候选）');
+    else v.push('⚠️ TURN 中继不可用（当前免费中继线路不可达）：跨网且 NAT 严格时会连不上');
+    if (full.errors && full.errors.length) v.push('细节：' + full.errors.join('、') + '（701=STUN/TURN 不可达）');
+    v.push('（采集状态：' + full.gathering + '，用时 ' + (full.ms / 1000).toFixed(1) + ' 秒）');
+    if (box) box.innerHTML = '<pre class="text-xs whitespace-pre-wrap text-slate-600 leading-relaxed font-sans">' + esc(v.join('\n')) + '</pre>';
+    console.log('[ICE诊断]', { hostOnly, full });
+  } catch (e) {
+    if (box) box.innerHTML = '<p class="text-red-500 text-xs">诊断出错：' + esc(e.message || String(e)) + '</p>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '重新运行连接诊断'; }
+  }
 }
 
 // ==================== Friends Management ====================
