@@ -1438,9 +1438,8 @@ async function connectToFriend(friendId, from = null) {
 
   const existingSession = findSessionByDeviceId(friend.deviceId);
   if (existingSession) {
-    // 网络切换后 ICE 常停在 disconnected 不触发 close → 会话僵尸化
-    // （点进去看着"已连接"但什么都发不出去）。死通道当场清掉、走重新拨号
-    if (!existingSession.conn || !existingSession.conn.open) {
+    // 半死会话（对端网络切换后 conn.open 仍 true 但心跳失联）：当场清掉重拨
+    if (!isSessionAlive(existingSession)) {
       closeSession(existingSession);
     } else {
       setActiveSession(existingSession.key);
@@ -2090,39 +2089,45 @@ function schedulePresenceRetry() {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     initPresenceBeacon();
-    sweepDeadSessions(); // 回前台时巡检：后台期间网络可能切换过，僵尸会话当场清掉
+    sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
   }
 });
 
-// 网络环境切换（WiFi↔流量）主动自愈：本机 IP 一变，P2P 通道必然失效；
-// 更隐蔽的是信令 socket 可能半死（TCP 不发 FIN，页面永远不知道自己已掉线，
-// 还以注册态自居，实际服务器早已按失活清退）。监听网络类型切换，当场
-// 重建信令注册与发现总线；有活跃会话时先优雅收尾（比等 ICE 超时快得多）。
-// effectiveType 信号强度波动（3g↔4g 抖动）不触发，只有 wifi/cellular 真切换才动
+// 网络环境切换（WiFi↔流量）自愈：本机 IP 一变，信令 WS 可能半死（TCP 不发
+// FIN，页面永远不知道自己已掉线还以注册态自居，实际服务器已按失活清退）。
+// 保守策略：防抖 6 秒（切网瞬间 type 连续跳变只按最终状态处理一次）、
+// 绝不主动关闭会话（P2P 若真死了由心跳失联判死，活着的不误杀）、
+// 信令只做断开重连（PeerJS disconnect() 不动已建立的 P2P 通道）、
+// LAN 发现总线换子网房间重连。effectiveType 信号波动（3g↔4g 抖动）不触发。
 let lastNetType = (navigator.connection && navigator.connection.type) || '';
+let netChangeDebounce = null;
 function handleNetworkStackChange() {
   const con = navigator.connection || {};
   const t = con.type || '';
-  if (t === lastNetType) return; // 信号波动不是切网
+  if (!t || t === lastNetType) return; // 无类型信息 / 信号波动不是切网
   const prev = lastNetType;
   lastNetType = t;
-  console.warn('网络环境切换(' + (prev || '?') + '→' + (t || '?') + ')，重建信令与发现');
-  const hasLive = Array.from(sessions.values()).some(x => x.conn && x.conn.open);
-  if (hasLive) sessions.forEach(s => closeSession(s)); // 本机 IP 已变，通道必死，主动收尾
-  initializePeer();
-  initPresenceBeacon();
-  resetLanBus();
-  updateLanIpDisplay().then(() => initLanDiscovery());
-  sweepDeadSessions();
+  clearTimeout(netChangeDebounce);
+  netChangeDebounce = setTimeout(() => {
+    console.warn('网络环境切换(' + prev + '→' + t + ')，重建信令与发现');
+    try {
+      if (devicePeer && !devicePeer.destroyed && !devicePeer.open) initializePeer();
+      else if (devicePeer && !devicePeer.destroyed) { devicePeer.disconnect(); /* disconnected 事件里自动 reconnect */ }
+    } catch (e) { /* noop */ }
+    initPresenceBeacon();
+    resetLanBus();
+    updateLanIpDisplay().then(() => initLanDiscovery());
+    sessionHealthTick();
+  }, 6000);
 }
 if (navigator.connection && navigator.connection.addEventListener) {
   navigator.connection.addEventListener('change', handleNetworkStackChange);
 }
 window.addEventListener('online', () => {
   initPresenceBeacon();
-  sweepDeadSessions();
-  // 无活跃会话时顺带重建信令（offline 期间 socket 可能已半死而页面不知情）
-  const hasLive = Array.from(sessions.values()).some(x => x.conn && x.conn.open);
+  sessionHealthTick();
+  // 无活跃会话且信令未注册时顺带重建（offline 期间 socket 可能已半死）
+  const hasLive = Array.from(sessions.values()).some(x => isSessionAlive(x));
   if (!hasLive && devicePeer && !devicePeer.open) initializePeer();
 });
 window.addEventListener('online', () => { initPresenceBeacon(); });
@@ -2218,7 +2223,7 @@ function renderLocalsendList() {
 }
 
 function openLocalSend() {
-  sweepDeadSessions(); // 打开列表先清死会话：僵尸会话会让点击「跳死会话」而不是拨号
+  sessionHealthTick(); // 打开列表先跑一次健康巡检：死会话当场清掉、点击走重新拨号
   renderLocalsendList();
   renderDeviceAddress();
   switchTab('localsend');
@@ -2531,8 +2536,8 @@ function createPeer(peerId, kind) {
 function handleIncomingConnection(conn, kind) {
   if (sessions.has(conn.peer)) {
     const old = sessions.get(conn.peer);
-    if (old && old.conn && old.conn.open) {
-      // 同一 peerId 的重复连接（旧连接复用 ID），且旧会话还活着 → 拒一条避免串流
+    if (isSessionAlive(old)) {
+      // 同一 peerId 的重复连接且旧会话心跳活跃 → 拒一条避免串流
       try { conn.close(); } catch (e) { /* noop */ }
       return;
     }
@@ -2681,7 +2686,16 @@ function handlePeerError(err, kind, p) {
         // 绝不覆盖持久化识别码 —— 那会让好友记录与对方存储的地址全部失效
         stableIdRetry = (stableIdRetry || 0) + 1;
         if (stableIdRetry > 6) {
-          showToast('连接服务注册失败，请刷新页面重试', 'error');
+          // 不再死等用户手动刷新：重置计数、10 秒后自动换随机后缀重试
+          showToast('连接服务注册受阻，10 秒后自动重试', 'warning');
+          setTimeout(() => {
+            if (devicePeer && devicePeer.open) return; // 期间已恢复
+            stableIdRetry = 3;
+            peerIdSuffix = '-i' + Math.random().toString(36).slice(2, 6);
+            savePeerIdSuffix(peerIdSuffix);
+            console.warn('信令注册重试（新后缀）:', devicePeerId());
+            devicePeer = createPeer(devicePeerId(), 'device');
+          }, 10000);
           break;
         }
         let sfx = stableIdRetry === 1 ? tryReadPeerIdSuffix() : '';
@@ -3052,10 +3066,10 @@ function onLocalsendRowClick(row) {
     showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
-  // 已有该设备的会话：活的直接切到聊天；死的（网络切换僵尸化）清掉重拨
+  // 已有该设备的会话：心跳活跃的直接切聊天；失联/未完成的清掉重拨
   const existingSession = findSessionByDeviceId(row.deviceId);
   if (existingSession) {
-    if (existingSession.conn && existingSession.conn.open) {
+    if (isSessionAlive(existingSession)) {
       setActiveSession(existingSession.key);
       switchTab('chat');
       return;
@@ -3077,11 +3091,11 @@ function startCodeSessionWithConn(conn) {
 
 function createSession(conn, opts) {
   opts = opts || {};
-  // 同 key 旧会话若已死（网络切换后 ICE 常停在 disconnected、不触发 close），
+  // 同 key 旧会话若已死（对端网络切换后 conn.open 仍 true 但心跳失联），
   // 先清掉再挂新会话——否则僵尸会话占位：点击直连直接跳进死会话、
   // 对方重拨入也会被「已有会话」挡掉
   const oldSameKey = sessions.get(String(conn.peer));
-  if (oldSameKey && (!oldSameKey.conn || !oldSameKey.conn.open)) {
+  if (oldSameKey && !isSessionAlive(oldSameKey)) {
     closeSession(oldSameKey);
   }
   const s = {
@@ -3102,6 +3116,7 @@ function createSession(conn, opts) {
     receivedBytes: 0,
     textAssembly: {},
     unread: 0,
+    lastPong: Date.now(), // 应用层心跳：最近一次收到对端 pong 的时刻
     created: Date.now(),
     closed: false
   };
@@ -3252,6 +3267,14 @@ function handleControl(msg, s) {
       }
       break;
     }
+    case 'ping':
+      // 应用层心跳：DataChannel 没有 keepalive，对端消失后本端 conn.open 会
+      // 永远保持 true。靠 ping/pong 才能判定「通道真的还活着」
+      try { sendControl(s, { type: 'pong' }); } catch (e) { /* 半死通道：留给健康巡检收尾 */ }
+      break;
+    case 'pong':
+      s.lastPong = Date.now();
+      break;
   }
 }
 
@@ -4480,19 +4503,41 @@ function closeSession(s) {
   if (currentTab === 'chat') renderChat(true);
 }
 
-// 会话健康巡检：网络切换（WiFi↔流量）后 ICE 常停在 disconnected 且不触发
-// close，会话会一直挂着"已连接"的假象（纸飞机/LocalSend 点击直接跳进死会话、
-// 对方重拨入也会被挡）。在关键交互与定期巡检时清掉死会话；新建会话留 15 秒
-// 握手宽限（入站连接在确认弹窗期间 conn 尚未 open，不能误杀）
-function sweepDeadSessions() {
+// 会话健康判定（应用层心跳）：DataChannel 没有 keepalive，对端消失后本端
+// conn.open 会永远保持 true——只看 conn.open 既抓不到真僵尸，还会把握手
+// 未完成（ICE 慢协商）的会话误杀。以 ping/pong 为唯一可信死活信号：
+// 每 5 秒 ping，40 秒无 pong 判死；握手 45 秒未开（覆盖 20/25 秒拨号超时
+// + TURN 中继慢分配余量）才按失败清理。
+const SESSION_PONG_STALE_MS = 40000;
+const SESSION_HANDSHAKE_GRACE_MS = 45000;
+
+function isSessionAlive(s) {
+  if (!s || s.closed) return false;
+  if (!s.conn || !s.conn.open) return false;
+  return Date.now() - (s.lastPong || 0) < SESSION_PONG_STALE_MS;
+}
+
+function sessionHealthTick() {
+  const now = Date.now();
   sessions.forEach(s => {
     if (s.closed) return;
     if (!s.conn || !s.conn.open) {
-      if (Date.now() - (s.created || 0) > 15000) {
-        console.warn('清理失活会话:', s.key);
+      // 通道尚未打开：拨号/入站握手最多 25s，ICE 慢协商再宽限一截
+      if (now - (s.created || 0) > SESSION_HANDSHAKE_GRACE_MS) {
+        console.warn('握手未完成，清理会话:', s.key);
         closeSession(s);
       }
+      return;
     }
+    // 通道"开着"但心跳失联 → 半死僵尸（对端网络切换/页面关闭收不到 close）→ 收尾
+    if (now - (s.lastPong || 0) > SESSION_PONG_STALE_MS) {
+      console.warn('会话心跳失联，判定断开:', s.key);
+      const name = sessionDisplayName(s);
+      closeSession(s);
+      showToast('与 ' + esc(name) + ' 的连接已断开', 'warning');
+      return;
+    }
+    try { sendControl(s, { type: 'ping' }); } catch (e) { /* 通道半死抛错：下轮超时收尾 */ }
   });
 }
 
@@ -4812,7 +4857,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderSessionChips();
   // LocalSend 列表定期刷新：TTL 过期的设备离线消失，状态行的发现数同步
   setInterval(() => {
-    sweepDeadSessions(); // 网络切换后的僵尸会话 15 秒宽限期一过即自动清掉
+    sessionHealthTick(); // 应用层心跳：失联 40s 判死、握手 45s 未开清理
     updateConnectionStatus();
     const mode = document.getElementById('localsendMode');
     if (mode && !mode.classList.contains('hidden')) {
