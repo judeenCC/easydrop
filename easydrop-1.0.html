@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r9 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r9</button>
+                title="当前版本 v26.10.26-r10 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r10</button>
             </div>
           </div>
         </div>
@@ -1894,7 +1894,6 @@ function handleLanBeaconPayload(text) {
     const name = (typeof msg.name === 'string' && msg.name.trim())
       ? msg.name.trim().slice(0, 40) : '未知设备';
     lanPeers.set(sid, { id: id, name: name, sid: sid, ts: Date.now() });
-    maybeUpgradeToLan(id); // 对端进了同一局域网、当前还在走中继 → 换直连
     renderLocalsendList();
     refreshLanStatus();
     updateFriendOnlineIndicators(); // LAN 信标同样参与好友纸飞机的在线判定
@@ -2179,12 +2178,6 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     initPresenceBeacon();
     sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
-    // 后台换网的 connection change 可能被浏览器节流没跑：补一次类型比对
-    try {
-      const con = navigator.connection || {};
-      if (con.type && con.type !== lastNetType) handleNetworkStackChange();
-    } catch (e) { /* noop */ }
-    refreshLanIpAndMaybeUpgrade(); // 休眠唤醒后 IP 可能已经变了
   }
 });
 
@@ -2205,8 +2198,6 @@ function handleNetworkStackChange() {
   clearTimeout(netChangeDebounce);
   netChangeDebounce = setTimeout(() => {
     console.warn('网络环境切换(' + prev + '→' + t + ')，重建信令与发现');
-    lanIpCache = null; // 旧网 IP 缓存作废，否则发现总线订不进新子网
-    markNetworkSwitch(); // 确认换网：新网络下主动换 ICE 链路，不等旧链路撞死
     try {
       if (devicePeer && !devicePeer.destroyed && !devicePeer.open) initializePeer();
       else if (devicePeer && !devicePeer.destroyed) { devicePeer.disconnect(); /* disconnected 事件里自动 reconnect */ }
@@ -2226,260 +2217,8 @@ window.addEventListener('online', () => {
   // 无活跃会话且信令未注册时顺带重建（offline 期间 socket 可能已半死）
   const hasLive = Array.from(sessions.values()).some(x => isSessionAlive(x));
   if (!hasLive && devicePeer && !devicePeer.open) initializePeer();
-  // 断网恢复往往就是一次换网（旧链路的 NAT 映射已死）→ 准备换链路
-  markNetworkSwitch();
 });
 window.addEventListener('online', () => { initPresenceBeacon(); });
-
-// ==================== 网络切换后主动换链路（无感升级接管） ====================
-// 换网（WiFi↔流量 / 异网→同网）后，既有 P2P 仍挂在旧 ICE 路径上（旧 NAT
-// 映射、跨网中继、半死的 mDNS 域名）。它往往「还没死透」——心跳偶尔能到，
-// 所以不会立刻重拨，而是断断续续 1~3 分钟才收敛到新网直连。
-// 对策：确认换网后先通知对端，再关掉旧通道、立刻拨一条新链路（新网马上
-// 协商出 host 直连）。PeerJS 在旧连接还活着时再 connect 会一直挂起，所以
-// 不能「先拨通再退役」。对端把这次 close 当成计划退役（或 4 秒宽限内的
-// 重连），不弹断开、不额外重拨。双方同时换网时识别码较小的一端先拨。
-const NET_UPGRADE_WINDOW_MS = 90000;
-const netUpgrade = {
-  markedAt: 0,
-  pendingTimer: null,
-  force: false,                 // 确认换网：忽略冷却，即使 stats 仍显示 host 也换
-  active: new Set(),
-  inflight: new Map(),          // deviceId -> { yielded, conn }
-  cooldown: new Map()
-};
-// 断线后的短暂宽限：换网升级会先关旧通道再立刻拨新的。这 4 秒里同一设备
-// 重新连上就当成迁移，不弹「已断开」、也不再自动重拨。
-const swapGrace = new Map();
-
-function markNetworkSwitch() {
-  netUpgrade.markedAt = Date.now();
-  netUpgrade.force = true;
-  clearTimeout(netUpgrade.pendingTimer);
-  // 信令/LAN 发现都在重建中：等一拍再拨（新网就绪的证据是信令重新注册）
-  netUpgrade.pendingTimer = setTimeout(() => { runNetworkUpgradePass(0); }, 1500);
-}
-
-function waitMs(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// 会话正在传文件时绝不换链路：让同一份数据走完同一条通道
-function isTransferBusy(s) {
-  const sending = s.currentTransfer && s.currentTransfer.status === 'sending';
-  const receiving = s.currentReceive && (s.currentReceive.status === 'receiving' || s.currentReceive.status === 'pending');
-  return !!(sending || receiving);
-}
-
-// 当前选中的候选对是否已是两端 host（局域网直连）。换网确认（force）
-// 不能信这个结果：旧网的 host 对在 stats 里会继续显示，直到它自己死透。
-async function sessionOnDirectLan(s) {
-  const pc = s && s.conn && (s.conn.peerConnection || s.conn._pc);
-  if (!pc || typeof pc.getStats !== 'function') return false;
-  try {
-    const stats = await pc.getStats();
-    let pair = null;
-    stats.forEach(r => {
-      if (r.type === 'candidate-pair' && (r.selected || r.nominated)) pair = r;
-    });
-    if (!pair) return false;
-    const local = stats.get(pair.localCandidateId);
-    const remote = stats.get(pair.remoteCandidateId);
-    return !!(local && remote && local.candidateType === 'host' && remote.candidateType === 'host');
-  } catch (e) { return false; }
-}
-
-function stashSessionAssets(s) {
-  if (!s) return null;
-  return {
-    wasActive: activeSessionKey === s.key,
-    fileQueue: (s.fileQueue || []).filter(f => f && !f.history && f.status !== 'sent' && f.status !== 'failed' && f.status !== 'sending'),
-    receivedFiles: (s.receivedFiles || []).filter(f => f && !f.history && f.status === 'received' && f.blob)
-  };
-}
-
-function applySessionStash(s, stash) {
-  if (!s || !stash) return;
-  (stash.fileQueue || []).forEach(f => { if (!s.fileQueue.some(x => x.id === f.id)) s.fileQueue.push(f); });
-  (stash.receivedFiles || []).forEach(f => { if (!s.receivedFiles.some(x => x.id === f.id)) s.receivedFiles.push(f); });
-}
-
-async function runNetworkUpgradePass(attempt) {
-  attempt = attempt || 0;
-  const forced = netUpgrade.force;
-  netUpgrade.force = false;
-  if (!netUpgrade.markedAt || Date.now() - netUpgrade.markedAt > NET_UPGRADE_WINDOW_MS) return;
-  // 用户正在主动拨号（连接码/横幅/候选轮换是共享的全局状态机）：不抢
-  if (dialActive || dialingFriend || dialingCode) {
-    if (forced) setTimeout(() => { netUpgrade.force = true; runNetworkUpgradePass(attempt); }, 3000);
-    return;
-  }
-  if (!devicePeer) return;
-  if (!devicePeer.open) { const ok = await ensurePeerOpen(8000); if (!ok) return; }
-  const live = Array.from(sessions.values()).filter(s =>
-    !s.closed && !s.codeHosted && s.conn && s.conn.open && isSessionAlive(s) && sessionDeviceCode(s) && !isTransferBusy(s));
-  for (const s of live) {
-    const deviceId = sessionDeviceCode(s);
-    if (!netUpgrade.active.has(deviceId) && !netUpgrade.inflight.has(deviceId)) {
-      netUpgrade.active.add(deviceId);
-      startNetworkUpgrade(deviceId, attempt, forced).finally(() => netUpgrade.active.delete(deviceId));
-    }
-    await waitMs(300); // 错峰拨号，信令消息不要瞬间挤爆
-  }
-}
-
-// 看到对端出现在同一局域网、而当前会话还不是 host 直连 → 换链路。
-// 没换网的那一端靠这个感知「对方已经进了同一 WiFi」，不必干等旧中继死透。
-function maybeUpgradeToLan(deviceId) {
-  if (!deviceId || deviceId === myDeviceId) return;
-  if (netUpgrade.active.has(deviceId) || netUpgrade.inflight.has(deviceId)) return;
-  if (Date.now() - (netUpgrade.cooldown.get(deviceId) || 0) < 45000) return;
-  const s = findSessionByDeviceId(deviceId);
-  if (!s || s.closed || s.codeHosted || !isSessionAlive(s) || isTransferBusy(s) || s._lanCheck) return;
-  s._lanCheck = true;
-  sessionOnDirectLan(s).then(direct => {
-    s._lanCheck = false;
-    if (direct || s.closed) return;
-    if (!netUpgrade.markedAt) netUpgrade.markedAt = Date.now();
-    netUpgrade.active.add(deviceId);
-    startNetworkUpgrade(deviceId, 0, false).finally(() => netUpgrade.active.delete(deviceId));
-  }).catch(() => { s._lanCheck = false; });
-}
-
-function rememberSwapGrace(code, stash, quiet) {
-  if (!code) return;
-  const prev = swapGrace.get(code);
-  if (prev && prev.timer) clearTimeout(prev.timer);
-  swapGrace.set(code, { stash: stash || (prev && prev.stash) || null, at: Date.now(), quiet: !!quiet });
-}
-
-function consumeSwapGrace(code, newSession) {
-  const g = code && swapGrace.get(code);
-  if (!g || Date.now() - g.at > 15000) return false;
-  if (g.timer) clearTimeout(g.timer);
-  swapGrace.delete(code);
-  if (g.stash && newSession) applySessionStash(newSession, g.stash);
-  return true;
-}
-
-async function startNetworkUpgrade(deviceId, attempt, forced) {
-  let conn = null;
-  const inflight = { yielded: false };
-  try {
-    if (!devicePeer || devicePeer.destroyed) return;
-    if (!devicePeer.open) { const ok = await ensurePeerOpen(8000); if (!ok) return; }
-    if (netUpgrade.inflight.has(deviceId)) return;
-    // 双方同时换网时只让识别码较小的一端先拨，另一端等 2 秒。
-    // 对方没感知到换网（不会拨）时，等完自己拨，最多晚 2 秒。
-    if (String(myDeviceId) > String(deviceId) && attempt === 0) {
-      await waitMs(2000);
-      if (netUpgrade.inflight.has(deviceId)) return;
-      const raced = findSessionByDeviceId(deviceId);
-      if (raced && raced.upgradedAt && Date.now() - raced.upgradedAt < 20000) return;
-    }
-    const old = findSessionByDeviceId(deviceId);
-    if (!old || old.closed || old.codeHosted) return;
-    if (!isSessionAlive(old) && !forced) return;
-    if (!forced && attempt === 0 && Date.now() - (netUpgrade.cooldown.get(deviceId) || 0) < 45000) return;
-    if (!forced && await sessionOnDirectLan(old)) return; // 已经是局域网直连，不折腾
-    if (isTransferBusy(old)) {
-      if (attempt < 1) setTimeout(() => { startNetworkUpgrade(deviceId, 1, forced); }, 20000);
-      return;
-    }
-    // PeerJS 对「同一对端已有活连接时再 connect」会一直挂起，第二条链路
-    // 永远 open 不了。必须先关掉旧的再拨。关之前尽量通知对端，让它把
-    // 这次 close 当成计划退役而不是意外断线。
-    const stash = stashSessionAssets(old);
-    const target = resolvePeerSid(deviceId) || old.key;
-    try { sendControl(old, { type: 'net-upgrade' }); } catch (e) { /* 旧通道已死：对端走 4 秒宽限 */ }
-    old.quietRetire = true;
-    rememberSwapGrace(deviceId, stash, true);
-    closeSession(old);
-    await waitMs(350); // 等 LEAVE 送达，避免新 offer 和旧连接撞车
-    if (inflight.yielded) return;
-    const taken = findSessionByDeviceId(deviceId);
-    if (taken && isSessionAlive(taken)) return; // 等待期间对方已经拨通
-    netUpgrade.inflight.set(deviceId, inflight);
-    conn = devicePeer.connect(target, {
-      reliable: true,
-      metadata: { deviceName: myDeviceName, deviceId: myDeviceId, upgrade: 'net-switch' }
-    });
-    inflight.conn = conn;
-    let settled = false;
-    const abandon = () => {
-      if (settled) return;
-      settled = true;
-      if (netUpgrade.inflight.get(deviceId) === inflight) netUpgrade.inflight.delete(deviceId);
-      try { if (conn) conn.close(); } catch (e) { /* noop */ }
-      if (inflight.yielded) return;
-      const live = findSessionByDeviceId(deviceId);
-      if (live && isSessionAlive(live)) return;
-      console.warn('网络升级未完成，回落:', deviceId, 'attempt', attempt);
-      if (attempt < 1 && netUpgrade.markedAt && Date.now() - netUpgrade.markedAt <= NET_UPGRADE_WINDOW_MS) {
-        setTimeout(() => { startNetworkUpgrade(deviceId, 1, forced); }, 8000);
-        return;
-      }
-      maybeAutoReconnect({ identity: { deviceId }, key: target });
-    };
-    conn.on('error', abandon);
-    conn.on('close', abandon);
-    conn.on('open', () => {
-      if (settled) return;
-      if (inflight.yielded) { abandon(); return; }
-      settled = true;
-      if (netUpgrade.inflight.get(deviceId) === inflight) netUpgrade.inflight.delete(deviceId);
-      try {
-        const oldNow = findSessionByDeviceId(deviceId);
-        if (oldNow && isSessionAlive(oldNow) && oldNow.conn !== conn) {
-          try { conn.close(); } catch (e) { /* noop */ }
-          return;
-        }
-        netUpgrade.cooldown.set(deviceId, Date.now());
-        createSession(conn, {
-          isInitiator: true,
-          userConfirm: false,
-          upgradeSwap: true,
-          swapWasActive: !!(stash && stash.wasActive),
-          stash: stash
-        });
-        console.warn('网络升级接管完成:', deviceId, '→', target);
-      } catch (e) {
-        console.warn('网络升级接管失败:', e);
-        try { conn.close(); } catch (e2) { /* noop */ }
-      }
-    });
-    setTimeout(() => { if (!settled) abandon(); }, 16000);
-  } catch (e) {
-    console.warn('网络升级拨号失败:', e);
-    if (netUpgrade.inflight.get(deviceId) === inflight) netUpgrade.inflight.delete(deviceId);
-  }
-}
-
-// 本机局域网 IP 变化（WiFi A→WiFi B 时 connection.type 往往不变）也是换网。
-// detectLanIp 有永久缓存，不主动失效的话发现总线会一直订在旧子网房间里。
-let lanIpWatch = '';
-let lanIpPending = '';
-async function refreshLanIpAndMaybeUpgrade() {
-  if (document.hidden) return;
-  if (Array.from(sessions.values()).some(isTransferBusy)) return; // 探测用的 RTCPeerConnection 不跟正在传的文件抢
-  const prev = lanIpCache;
-  lanIpCache = null;
-  let ip = null;
-  try { ip = await detectLanIp(); } catch (e) { ip = null; }
-  if (!ip) { if (!lanIpCache) lanIpCache = prev; return; }
-  if (lanIpWatch && ip !== lanIpWatch) {
-    // 连续两次探测都是新 IP 才认定换网，避免虚拟网卡候选顺序抖动反复重连
-    if (lanIpPending !== ip) { lanIpPending = ip; return; }
-    console.warn('局域网 IP 变化 ' + lanIpWatch + ' → ' + ip + '，换链路');
-    lanIpWatch = ip;
-    lanIpPending = '';
-    resetLanBus();
-    initLanDiscovery();
-    markNetworkSwitch();
-    return;
-  }
-  lanIpPending = '';
-  lanIpWatch = ip;
-}
-setInterval(refreshLanIpAndMaybeUpgrade, 12000);
 
 function renderLocalsendList() {
   const list = document.getElementById('localsendDeviceList');
@@ -2603,15 +2342,10 @@ async function dialByAddress(purpose, inputId, from = null) {
 async function dialDevice(deviceId, from = null, purpose = 'connect') {
   const existingSession = findSessionByDeviceId(deviceId);
   if (existingSession) {
-    // 失联/未完成的会话不能占位：换网后 conn.open 可能还是 true，
-    // 但心跳已死。不清掉的话每次点击都「已存在」跳进死会话，要等好几分钟。
-    if (!isSessionAlive(existingSession)) closeSession(existingSession);
-    else {
-      setActiveSession(existingSession.key);
-      switchTab('chat');
-      showToast('与该设备的连接已存在，已切换到聊天', 'info');
-      return;
-    }
+    setActiveSession(existingSession.key);
+    switchTab('chat');
+    showToast('与该设备的连接已存在，已切换到聊天', 'info');
+    return;
   }
   const busy = dialActive || dialingFriend || dialingCode;
   if (busy) {
@@ -2884,56 +2618,15 @@ function createPeer(peerId, kind) {
 // 设备 peer 的入站：好友与陌生设备一律先弹确认（收端确认是点对点传文件的
 // 标准交互，避免好友链路被静默占用）；多个请求依次排队。
 function handleIncomingConnection(conn, kind) {
-  // 对端「网络切换升级」连接（metadata.upgrade 标记）：它带来了对端新网络
-  // 的最新路径。旧会话即使心跳还在，也多半挂在半死的旧链路上 → 计划性让位。
-  // 已经在通话的对端视为可信（不必再弹确认），否则换网时 16 秒确认窗会把
-  // 升级拨号拖死，又掉回「断 1~3 分钟」的老路。
-  const isUpgrade = !!(conn.metadata && conn.metadata.upgrade === 'net-switch');
-  const callerCode = deviceCodeFromPeerId(conn.peer);
-  const hadSession = sessions.has(conn.peer) || !!(callerCode && findSessionByDeviceId(callerCode)) || !!(callerCode && swapGrace.has(callerCode) && Date.now() - swapGrace.get(callerCode).at < 15000);
-  if (isUpgrade && callerCode && netUpgrade.inflight.has(callerCode) && String(myDeviceId) < String(callerCode)) {
-    // 双方同时换网对拨：识别码较小的一端当主动方，拒掉对方的升级拨号
-    try { conn.close(); } catch (e) { /* noop */ }
-    return;
-  }
-  if (isUpgrade && callerCode && netUpgrade.inflight.has(callerCode)) {
-    // 让步方：撤掉自己还在飞的升级拨号，收对方这条
-    const inflight = netUpgrade.inflight.get(callerCode);
-    netUpgrade.inflight.delete(callerCode);
-    if (inflight) {
-      inflight.yielded = true;
-      try { if (inflight.conn) inflight.conn.close(); } catch (e) { /* noop */ }
-    }
-  }
-  let stash = null;
-  const retireForUpgrade = (old) => {
-    if (!old || old.closed) return 'gone';
-    if (isSessionAlive(old) && isTransferBusy(old)) return 'busy';
-    stash = stash || stashSessionAssets(old);
-    old.quietRetire = true;
-    closeSession(old);
-    return 'retired';
-  };
   if (sessions.has(conn.peer)) {
     const old = sessions.get(conn.peer);
-    if (isSessionAlive(old) && !(isUpgrade && !isTransferBusy(old))) {
+    if (isSessionAlive(old)) {
       // 同一 peerId 的重复连接且旧会话心跳活跃 → 拒一条避免串流
       try { conn.close(); } catch (e) { /* noop */ }
       return;
     }
-    if (retireForUpgrade(old) === 'busy') {
-      old.quietRetire = false; // 没接住：旧会话继续按意外断线处理
-      try { conn.close(); } catch (e) { /* noop */ }
-      return;
-    }
-  } else if (isUpgrade && callerCode) {
-    // 本端重建过信令 ID 时，旧会话的 key 是对端的旧 sid——按识别码兜底匹配
-    const stale = findSessionByDeviceId(callerCode);
-    if (stale && stale.key !== conn.peer && retireForUpgrade(stale) === 'busy') {
-      stale.quietRetire = false;
-      try { conn.close(); } catch (e) { /* noop */ }
-      return;
-    }
+    // 旧会话已死（网络切换后重拨）：清掉接收新连接
+    closeSession(old);
   }
   // 自连接兜底：信令 ID 环回（理论上拨号侧已排除本实例）
   if (devicePeer && conn.peer === devicePeer.id) {
@@ -2945,11 +2638,10 @@ function handleIncomingConnection(conn, kind) {
     return;
   }
   // 好友直连：双向免确认（已是好友即信任对方），静默直接建立会话开始传输；
-  // 换网升级且本来就有会话：同样免确认（再弹窗会把升级拖死）。
   // 陌生设备仍走弹窗确认（收端把关是陌生人连接的安全底线）
-  if ((callerCode && friends.some(f => f.deviceId === callerCode)) || (isUpgrade && hadSession)) {
-    const s2 = acceptIncomingSession(conn, false, true, isUpgrade && hadSession, stash);
-    if (s2 && isUpgrade) netUpgrade.cooldown.set(callerCode, Date.now());
+  const callerCode = deviceCodeFromPeerId(conn.peer);
+  if (callerCode && friends.some(f => f.deviceId === callerCode)) {
+    acceptIncomingSession(conn, false, true);
     return;
   }
   // 陌生设备：入确认队列（一次只弹一个窗，其余等待）
@@ -3006,14 +2698,11 @@ function showNextIncomingConfirm() {
 
 // 接受入站连接并建立会话；autoAddFriend=选择「接受并加好友」时握手后自动添加。
 // silentAccept=true（好友免确认直连）时不打断当前操作：会话静默出现在"会话"页
-function acceptIncomingSession(conn, autoAddFriend, silentAccept, upgradeSwap, stash) {
-  return createSession(conn, {
+function acceptIncomingSession(conn, autoAddFriend, silentAccept) {
+  createSession(conn, {
     isInitiator: false,
     autoAddNext: !!autoAddFriend,
-    userConfirm: !silentAccept,
-    upgradeSwap: !!upgradeSwap,
-    swapWasActive: !!(stash && stash.wasActive),
-    stash: stash || null
+    userConfirm: !silentAccept
   });
 }
 
@@ -3502,11 +3191,7 @@ function createSession(conn, opts) {
   // 先清掉再挂新会话——否则僵尸会话占位：点击直连直接跳进死会话、
   // 对方重拨入也会被「已有会话」挡掉
   const oldSameKey = sessions.get(String(conn.peer));
-  if (oldSameKey && oldSameKey.conn !== conn) {
-    // 同 key 旧会话还在时直接 set 会把旧 conn 变成孤儿。计划性退役：
-    // 不弹断开、不触发自动重连（升级接管 / 对端重拨都走这里）
-    oldSameKey.quietRetire = true;
-    if (!opts.stash) opts.stash = stashSessionAssets(oldSameKey);
+  if (oldSameKey && !isSessionAlive(oldSameKey)) {
     closeSession(oldSameKey);
   }
   const s = {
@@ -3531,12 +3216,11 @@ function createSession(conn, opts) {
     created: Date.now(),
     closed: false
   };
-  if (opts.stash) applySessionStash(s, opts.stash); // 必须在 handleOpen 之前，已打开的通道会同步跑队列
   sessions.set(s.key, s);
   restoreChatHistory(s); // 回填与该设备的历史聊天记录（刷新/重连后仍在）
   // 拨号状态复位：仅本端主动发起或用户确认过的会话才清理拨号横幅/状态；
   // 静默接受的入站会话（好友免确认直连）不抢走正在进行的拨号
-  if ((s.isInitiator || s.userConfirm) && !opts.upgradeSwap) {
+  if (s.isInitiator || s.userConfirm) {
     dialActive = false;
     pendingDialConn = null;
     dialFrom = null;
@@ -3551,15 +3235,8 @@ function createSession(conn, opts) {
   const handleOpen = () => {
     if (s.closed) return;
     updateConnectionStatus();
-    // 会话归属：网络切换无感迁移 → 不抢页签，旧会话正被查看则视图平移；
-    // 主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
-    if (opts.upgradeSwap) {
-      if (opts.swapWasActive || !activeSessionKey || !sessions.has(activeSessionKey)) {
-        activeSessionKey = s.key; // 正在看的旧会话退役 → 视图平移到新链路（无感）
-      } else {
-        s.unread++;
-      }
-    } else if (s.isInitiator || s.userConfirm) {
+    // 会话归属：主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
+    if (s.isInitiator || s.userConfirm) {
       activeSessionKey = s.key;
       switchTab('chat');
     } else {
@@ -3573,12 +3250,7 @@ function createSession(conn, opts) {
     renderSessionChips();
     renderChat(true); // 强制刷新一次，确保头部状态与输入条立即随新连接置为可用
     const name = sessionDisplayName(s);
-    const swapped = opts.upgradeSwap || consumeSwapGrace(deviceCodeFromPeerId(s.key) || sessionDeviceCode(s), s);
-    if (swapped) {
-      s.upgradedAt = Date.now();
-      showToast('网络已切换，连接已迁移到当前网络', 'info');
-      processSendQueue(s); // 承接过来的待发文件从新链路继续
-    } else if (s.isInitiator || s.userConfirm) {
+    if (s.isInitiator || s.userConfirm) {
       showToast('已与 ' + name + ' 建立连接', 'success');
     } else {
       showToast(name + ' 已与你建立连接，打开"会话"标签查看', 'info');
@@ -3607,40 +3279,17 @@ function createSession(conn, opts) {
 
 function onSessionConnClosed(s) {
   if (!s || s.closed) return;
-  const code = sessionDeviceCode(s);
-  const name = sessionDisplayName(s);
   const midReceive = s.currentReceive;
   const midSend = s.currentTransfer;
-  const stash = stashSessionAssets(s);
-  if (midReceive && !s.quietRetire) midReceive.status = 'failed';
-  if (midSend && !s.quietRetire) midSend.status = 'failed';
+  if (midReceive) midReceive.status = 'failed';
+  if (midSend) midSend.status = 'failed';
+  // 中断时带上已收/已发字节数：一眼区分「网络中途崩」与「打包/校验错」
   const detail = midReceive
     ? '，已接收 ' + formatFileSize(midReceive.receivedBytes || 0) + '/' + formatFileSize(midReceive.size)
     : (midSend ? '，已发送 ' + formatFileSize(midSend.sentBytes || 0) + '/' + formatFileSize(midSend.size) : '');
-  // 计划退役，或 4 秒内会有升级连接拨回来：先别宣判断开。
-  // 宽限内重新连上由 consumeSwapGrace 取消提示和重拨。
-  if (s.quietRetire) {
-    rememberSwapGrace(code, stash, true);
-    closeSession(s);
-    return;
-  }
+  showToast('与 ' + sessionDisplayName(s) + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' + detail : ''), 'warning');
   closeSession(s);
-  if (!code) {
-    showToast('与 ' + name + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' + detail : ''), 'warning');
-    return;
-  }
-  const prev = swapGrace.get(code);
-  if (prev && prev.timer) clearTimeout(prev.timer);
-  const timer = setTimeout(() => {
-    const g = swapGrace.get(code);
-    if (!g || g.timer !== timer) return;
-    swapGrace.delete(code);
-    const back = findSessionByDeviceId(code);
-    if (back && isSessionAlive(back)) return;
-    showToast('与 ' + name + ' 的连接已断开' + ((midReceive || midSend) ? '，文件传输不完整' + detail : ''), 'warning');
-    maybeAutoReconnect({ identity: { deviceId: code }, key: '' });
-  }, 4000);
-  swapGrace.set(code, { stash: (prev && prev.stash) || stash, at: Date.now(), timer });
+  maybeAutoReconnect(s); // 意外断开且对方仍在线 → 自动重拨一次
 }
 
 // 非用户主动挂断的意外断开（conn close 事件）：对方 presence 仍有心跳时
@@ -3742,11 +3391,6 @@ function handleControl(msg, s) {
       }
       break;
     }
-    case 'net-upgrade':
-      // 对端要换到新网络的链路：马上关掉的旧通道不是意外断线
-      s.quietRetire = true;
-      rememberSwapGrace(sessionDeviceCode(s), stashSessionAssets(s), true);
-      break;
     case 'ping':
       // 应用层心跳：DataChannel 没有 keepalive，对端消失后本端 conn.open 会
       // 永远保持 true。靠 ping/pong 才能判定「通道真的还活着」
