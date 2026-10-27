@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r10 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r10</button>
+                title="当前版本 v26.10.26-r11 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r11</button>
             </div>
           </div>
         </div>
@@ -2181,32 +2181,74 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// 网络环境切换（WiFi↔流量）自愈：本机 IP 一变，信令 WS 可能半死（TCP 不发
-// FIN，页面永远不知道自己已掉线还以注册态自居，实际服务器已按失活清退）。
-// 保守策略：防抖 6 秒（切网瞬间 type 连续跳变只按最终状态处理一次）、
-// 绝不主动关闭会话（P2P 若真死了由心跳失联判死，活着的不误杀）、
-// 信令只做断开重连（PeerJS disconnect() 不动已建立的 P2P 通道）、
-// LAN 发现总线换子网房间重连。effectiveType 信号波动（3g↔4g 抖动）不触发。
+// 网络切换自愈：旧版只 disconnect→reconnect，半死的信令注册和旧 ICE
+// 会话会继续占位，表现为「必须强制刷新页面才能再连」。这里在确认换网后
+// 重建信令/发现，再按识别码重拨；不并发第二条 P2P，也不刷新页面。
 let lastNetType = (navigator.connection && navigator.connection.type) || '';
 let netChangeDebounce = null;
+let networkRecoveryTimer = null;
+let networkRecoveryRunning = false;
+let networkRecoveryAgain = false;
+let networkRecoveryUntil = 0;
+
+function scheduleNetworkRecovery(reason) {
+  networkRecoveryUntil = Date.now() + 120000;
+  clearTimeout(networkRecoveryTimer);
+  networkRecoveryTimer = setTimeout(() => { recoverNetworkStack(reason); }, 1800);
+}
+
+async function recoverNetworkStack(reason) {
+  if (networkRecoveryRunning) { networkRecoveryAgain = true; return; }
+  networkRecoveryRunning = true;
+  networkRecoveryAgain = false;
+  // 在清会话前记下对端识别码，重连不依赖旧的 sid（换网后 sid 可能已变）
+  const codes = [...new Set(Array.from(sessions.values()).map(sessionDeviceCode).filter(Boolean))];
+  const savedCode = sessionCode;
+  const hadCodePeer = !!codePeer; // 接收方正在输入连接码时没有 codePeer，不能反过来当宿主
+  console.warn('网络恢复：重建信令与发现（' + reason + '）');
+  showToast('检测到网络切换，正在恢复连接…', 'info');
+  try {
+    rememberSignaling(0); // 不允许一次抖动把设备留在被墙的备用云端
+    lanIpCache = null;
+    resetLanBus();
+    initPresenceBeacon();
+    // 网络切换后旧 ICE 路径不再可信：主动收尾，再只拨一条新连接。
+    // closeSession 不触发自动重拨，重拨统一在信令重新就绪后进行。
+    Array.from(sessions.values()).forEach(s => closeSession(s));
+    initializePeer(true); // 旧 socket 可能仍在服务器存活窗内，换新实例后缀避免 ID-TAKEN
+    if (codePeer) {
+      try { codePeer.destroy(); } catch (e) { /* noop */ }
+      codePeer = null;
+    }
+    if (savedCode && hadCodePeer) {
+      sessionCode = savedCode;
+      codeRetry = 0;
+      createCodePeer();
+    }
+    updateLanIpDisplay().then(() => {
+      if (lanIpCache) lanIpWatch = lanIpCache;
+      initLanDiscovery();
+    });
+    const ok = await ensurePeerOpen(12000);
+    if (ok) codes.forEach(code => maybeAutoReconnect({ identity: { deviceId: code }, key: PEER_PREFIX_DEV + code }));
+    else showToast('网络已切换，信令仍在恢复，请稍后重试', 'warning');
+  } catch (e) {
+    console.warn('网络恢复失败:', e);
+    showToast('网络切换后连接恢复失败，请稍后重试', 'warning');
+  } finally {
+    networkRecoveryRunning = false;
+    if (networkRecoveryAgain) scheduleNetworkRecovery('network-change-during-recovery');
+  }
+}
+
 function handleNetworkStackChange() {
   const con = navigator.connection || {};
   const t = con.type || '';
-  if (!t || t === lastNetType) return; // 无类型信息 / 信号波动不是切网
+  if (!t || t === lastNetType) return; // effectiveType 抖动不当作换网
   const prev = lastNetType;
   lastNetType = t;
   clearTimeout(netChangeDebounce);
-  netChangeDebounce = setTimeout(() => {
-    console.warn('网络环境切换(' + prev + '→' + t + ')，重建信令与发现');
-    try {
-      if (devicePeer && !devicePeer.destroyed && !devicePeer.open) initializePeer();
-      else if (devicePeer && !devicePeer.destroyed) { devicePeer.disconnect(); /* disconnected 事件里自动 reconnect */ }
-    } catch (e) { /* noop */ }
-    initPresenceBeacon();
-    resetLanBus();
-    updateLanIpDisplay().then(() => initLanDiscovery());
-    sessionHealthTick();
-  }, 6000);
+  netChangeDebounce = setTimeout(() => scheduleNetworkRecovery(prev + '→' + t), 2500);
 }
 if (navigator.connection && navigator.connection.addEventListener) {
   navigator.connection.addEventListener('change', handleNetworkStackChange);
@@ -2214,11 +2256,37 @@ if (navigator.connection && navigator.connection.addEventListener) {
 window.addEventListener('online', () => {
   initPresenceBeacon();
   sessionHealthTick();
-  // 无活跃会话且信令未注册时顺带重建（offline 期间 socket 可能已半死）
+  // 从 offline 恢复时重建；正常在线且仍有健康会话不主动拆连接
   const hasLive = Array.from(sessions.values()).some(x => isSessionAlive(x));
-  if (!hasLive && devicePeer && !devicePeer.open) initializePeer();
+  if (!hasLive || !devicePeer || !devicePeer.open) scheduleNetworkRecovery('online');
 });
-window.addEventListener('online', () => { initPresenceBeacon(); });
+
+// WiFi A→WiFi B 时 connection.type 仍都是 wifi，补一个轻量 IP 变化探测。
+// 连续两次都是新 IP 才认定换网，避免虚拟网卡候选顺序抖动造成误重连。
+let lanIpWatch = '';
+let lanIpCandidate = '';
+let lanIpProbeRunning = false;
+async function probeLanIpChange() {
+  if (document.hidden || lanIpProbeRunning || networkRecoveryRunning) return;
+  if (Array.from(sessions.values()).some(s => s.currentTransfer || s.currentReceive)) return;
+  lanIpProbeRunning = true;
+  const previous = lanIpCache;
+  lanIpCache = null;
+  let ip = null;
+  try { ip = await detectLanIp(); } catch (e) { ip = null; }
+  lanIpProbeRunning = false;
+  if (!ip) { if (!lanIpCache) lanIpCache = previous; return; }
+  if (lanIpWatch && ip !== lanIpWatch) {
+    if (lanIpCandidate !== ip) { lanIpCandidate = ip; return; }
+    lanIpWatch = ip;
+    lanIpCandidate = '';
+    scheduleNetworkRecovery('lan-ip-changed');
+  } else {
+    lanIpWatch = ip;
+    lanIpCandidate = '';
+  }
+}
+setInterval(probeLanIpChange, 15000);
 
 function renderLocalsendList() {
   const list = document.getElementById('localsendDeviceList');
@@ -2342,10 +2410,14 @@ async function dialByAddress(purpose, inputId, from = null) {
 async function dialDevice(deviceId, from = null, purpose = 'connect') {
   const existingSession = findSessionByDeviceId(deviceId);
   if (existingSession) {
-    setActiveSession(existingSession.key);
-    switchTab('chat');
-    showToast('与该设备的连接已存在，已切换到聊天', 'info');
-    return;
+    // conn.open 可能仍为 true 但心跳已死：清掉占位，允许重拨
+    if (!isSessionAlive(existingSession)) closeSession(existingSession);
+    else {
+      setActiveSession(existingSession.key);
+      switchTab('chat');
+      showToast('与该设备的连接已存在，已切换到聊天', 'info');
+      return;
+    }
   }
   const busy = dialActive || dialingFriend || dialingCode;
   if (busy) {
@@ -2617,6 +2689,14 @@ function createPeer(peerId, kind) {
 // 连接码 peer 的入站 = 接收方拨入，本端是发送方，直接建会话；
 // 设备 peer 的入站：好友与陌生设备一律先弹确认（收端确认是点对点传文件的
 // 标准交互，避免好友链路被静默占用）；多个请求依次排队。
+// 刚刚建立过的会话视为短期可信：网络切换后的自动回拨不再要求用户
+// 重新点确认（仍只保留 2 分钟，陌生设备首次连接仍必须确认）。
+const recentSessionPeers = new Map();
+function markRecentSessionPeer(s) {
+  const code = sessionDeviceCode(s);
+  if (code) recentSessionPeers.set(code, Date.now() + 120000);
+}
+
 function handleIncomingConnection(conn, kind) {
   if (sessions.has(conn.peer)) {
     const old = sessions.get(conn.peer);
@@ -2640,7 +2720,8 @@ function handleIncomingConnection(conn, kind) {
   // 好友直连：双向免确认（已是好友即信任对方），静默直接建立会话开始传输；
   // 陌生设备仍走弹窗确认（收端把关是陌生人连接的安全底线）
   const callerCode = deviceCodeFromPeerId(conn.peer);
-  if (callerCode && friends.some(f => f.deviceId === callerCode)) {
+  const recentlyConnected = callerCode && (recentSessionPeers.get(callerCode) || 0) > Date.now();
+  if ((callerCode && friends.some(f => f.deviceId === callerCode)) || recentlyConnected) {
     acceptIncomingSession(conn, false, true);
     return;
   }
@@ -2709,8 +2790,13 @@ function acceptIncomingSession(conn, autoAddFriend, silentAccept) {
 // 稳定设备 Peer：用于接收好友直连 / 发起直连与连接码拨号。
 // 同源多标签页（或极小概率撞码）时，后续实例自动改用会话级后缀注册；
 // 持久化识别码绝不覆盖 —— 覆盖会让好友记录指向死码
-function initializePeer() {
-  peerIdSuffix = tryReadPeerIdSuffix();
+function initializePeer(freshInstance) {
+  // 网络恢复时旧注册可能还在服务器存活窗内，使用新实例后缀可立即重新注册；
+  // 常规启动仍沿用原后缀，避免同源多窗口互相抢 ID。
+  peerIdSuffix = freshInstance
+    ? '-i' + Math.random().toString(36).slice(2, 7)
+    : tryReadPeerIdSuffix();
+  if (freshInstance) savePeerIdSuffix(peerIdSuffix);
   if (devicePeer) {
     try { devicePeer.destroy(); } catch (e) { /* noop */ }
     devicePeer = null;
@@ -3234,6 +3320,7 @@ function createSession(conn, opts) {
 
   const handleOpen = () => {
     if (s.closed) return;
+    markRecentSessionPeer(s);
     updateConnectionStatus();
     // 会话归属：主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
     if (s.isInitiator || s.userConfirm) {
@@ -3292,23 +3379,42 @@ function onSessionConnClosed(s) {
   maybeAutoReconnect(s); // 意外断开且对方仍在线 → 自动重拨一次
 }
 
-// 非用户主动挂断的意外断开（conn close 事件）：对方 presence 仍有心跳时
-// 2 秒后自动重拨一次（每设备 20 秒限频，防止网络抖动时反复重拨）
-const autoReconnectLast = new Map();
+// 非用户主动挂断的意外断开：按识别码排队重拨，而不是只尝试一次。
+// 换网期间 presence 可能还没来得及刷新，因此在恢复窗口内允许先拨；
+// 每个设备最多 4 次，成功后立即取消，避免抖动时无限重拨。
+const reconnectJobs = new Map();
 function maybeAutoReconnect(s) {
   const code = sessionDeviceCode(s);
-  if (!code || !isDeviceIdSeenLive(code)) return; // 对方已离线：不空拨
-  const now = Date.now();
-  if (now - (autoReconnectLast.get(code) || 0) < 20000) return;
-  autoReconnectLast.set(code, now);
-  showToast('连接中断，2 秒后自动尝试重连…', 'info');
-  setTimeout(() => {
+  if (!code || reconnectJobs.has(code)) return;
+  if (!isDeviceIdSeenLive(code) && Date.now() > networkRecoveryUntil) return;
+  const job = { attempts: 0, timer: null };
+  reconnectJobs.set(code, job);
+  const tick = () => {
+    if (!reconnectJobs.has(code)) return;
     const existing = findSessionByDeviceId(code);
-    if (existing && isSessionAlive(existing)) return; // 期间已恢复，不重复拨
+    if (existing && isSessionAlive(existing)) {
+      reconnectJobs.delete(code);
+      return;
+    }
+    if (existing) closeSession(existing); // 僵尸会话不能挡住手动/自动重拨
+    if (job.attempts >= 4 || (!isDeviceIdSeenLive(code) && Date.now() > networkRecoveryUntil)) {
+      reconnectJobs.delete(code);
+      return;
+    }
+    if (!navigator.onLine) { job.timer = setTimeout(tick, 5000); return; }
+    if (dialActive || dialingFriend || dialingCode || networkRecoveryRunning) {
+      job.timer = setTimeout(tick, 2500);
+      return;
+    }
+    job.attempts++;
+    if (job.attempts === 1) showToast('连接中断，正在自动重连…', 'info');
+    // 重拨前确保信令已重新注册；失败时 connectToFriend/dialDevice 自身会收尾
     const f = friends.find(fr => fr.deviceId === code);
-    if (f) connectToFriend(f.id, null);
-    else dialDevice(code, 'reconnect');
-  }, 2000);
+    const p = f ? connectToFriend(f.id, 'reconnect') : dialDevice(code, 'reconnect');
+    if (p && p.catch) p.catch(e => console.warn('自动重连失败:', e));
+    job.timer = setTimeout(tick, job.attempts === 1 ? 8000 : 12000);
+  };
+  job.timer = setTimeout(tick, 2000);
 }
 
 // ==================== Frame Protocol ====================
@@ -4063,9 +4169,9 @@ function buildChatItemEl(entry, s, animate) {
     statusText = out ? '已发送' : '已接收';
     statusColor = 'text-green-500';
     metaExtra = avgTransferMeta(item);
-    // 历史回填的接收文件没有本地 blob（文件本体不入库存档），
-    // 不展示可点下载按钮，避免点了没反应；仅作记录展示并标「历史」
-    const noBlob = !out && item.history && !item.blob;
+    // 新记录带有本机缓存 key，即使当前会话已关闭也允许尝试下载；
+    // 老历史没有文件本体 key，仍只作记录展示
+    const noBlob = !out && item.history && !item.blob && !item.storageKey;
     actionHtml = out
       ? `<div class="w-9 h-9 rounded-xl bg-green-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-check text-green-500 text-sm"></i></div>`
       : (noBlob
@@ -4119,8 +4225,8 @@ function buildChatItemEl(entry, s, animate) {
 
 // ==================== 会话历史持久化（每端设备独立存档） ====================
 // 诉求：刷新页面/断开重连后，会话窗口仍能保留与该设备的聊天记录。
-// 文本消息与文件元信息存 localStorage（文件本体不入库——收到过的文件若已
-// 下载则仍在本地；未下载的历史文件卡片仅作记录展示、标记「历史」不可再点下载）。
+// 文本消息与文件元信息存 localStorage；接收文件本体另存 IndexedDB，
+// 会话断开或刷新页面后，未另存过的文件也可以从本机缓存再次下载。
 const CHAT_HISTORY_KEY = 'easydrop_chat_history_v1';
 const CHAT_HISTORY_PER_PEER = 120;
 let chatHistoryStore = null;
@@ -4174,7 +4280,7 @@ function restoreChatHistory(s) {
     } else if (e.dir === 'out') {
       s.fileQueue.push({ id: e.id, name: e.name, size: e.size, type: e.type, status: 'sent', progress: 100, addedAt: e.addedAt || Date.now(), history: true });
     } else {
-      s.receivedFiles.push({ id: e.id, name: e.name, size: e.size, type: e.type, status: 'received', progress: 100, receivedBytes: e.size, addedAt: e.addedAt || Date.now(), history: true, blob: null });
+      s.receivedFiles.push({ id: e.id, name: e.name, size: e.size, type: e.type, status: 'received', progress: 100, receivedBytes: e.size, addedAt: e.addedAt || Date.now(), history: true, blob: null, storageKey: e.storageKey || '' });
     }
   });
 }
@@ -4603,8 +4709,9 @@ function finishReceive(s, msg) {
     item.status = 'received';
     item.progress = 100;
     item.totalMs = Date.now() - (item._t0 || Date.now());
+    cacheReceivedBlob(s, item); // 会话断开后仍能下载未另存的文件
     saveReceivedBlob(item); // 已授权目录则直接写入，否则走浏览器下载
-    chatHistoryAppend(s, { id: item.id, dir: 'in', kind: 'file', name: item.name, size: item.size, type: item.type, addedAt: item.addedAt || Date.now() });
+    chatHistoryAppend(s, { id: item.id, dir: 'in', kind: 'file', name: item.name, size: item.size, type: item.type, storageKey: item.storageKey, addedAt: item.addedAt || Date.now() });
     updateFriendTransferByRemote(s);
     addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s), code: sessionDeviceCode(s) });
   } else {
@@ -4633,17 +4740,98 @@ function abortReceive(s, msg) {
 
 function renderReceivedFiles(force) { renderChat(force); }
 
-function downloadReceivedFile(itemId) {
-  // 文件可能在任一会话中接收，全局匹配
+// 接收文件本体缓存：会话关闭/重连不等于用户已经保存了文件。
+// 内存负责立即可下载，IndexedDB 负责刷新页面后仍能取回；都不上传服务器。
+const receivedBlobCache = new Map();
+const RECEIVED_DB_NAME = 'easydrop_received_files_v1';
+const RECEIVED_DB_STORE = 'files';
+let receivedDbPromise = null;
+
+function receivedStorageKey(code, id) {
+  return String(code || 'unknown') + ':' + String(id);
+}
+
+function openReceivedDb() {
+  if (receivedDbPromise) return receivedDbPromise;
+  receivedDbPromise = new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('IndexedDB unavailable'));
+    const req = indexedDB.open(RECEIVED_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(RECEIVED_DB_STORE)) db.createObjectStore(RECEIVED_DB_STORE, { keyPath: 'key' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+    req.onblocked = () => reject(new Error('IndexedDB blocked'));
+  }).catch(e => { receivedDbPromise = null; throw e; });
+  return receivedDbPromise;
+}
+
+function cacheReceivedBlob(s, item) {
+  if (!item || !item.blob || item.id === undefined || item.id === null) return;
+  const code = sessionDeviceCode(s) || 'unknown';
+  const key = receivedStorageKey(code, item.id);
+  item.storageKey = key;
+  const record = { key, id: String(item.id), code, name: item.name, size: item.size, type: item.type, blob: item.blob, addedAt: item.addedAt || Date.now() };
+  receivedBlobCache.set(key, record);
+  // 异步落盘，不阻塞文件完成回调；配额不足时内存副本仍可下载
+  openReceivedDb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(RECEIVED_DB_STORE, 'readwrite');
+    tx.objectStore(RECEIVED_DB_STORE).put(record);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error || new Error('file cache write failed'));
+  })).then(() => { item.persisted = true; }).catch(e => console.warn('接收文件缓存失败:', e));
+}
+
+async function readReceivedBlob(key) {
+  if (!key) return null;
+  const memory = receivedBlobCache.get(key);
+  if (memory && memory.blob) return memory;
+  try {
+    const db = await openReceivedDb();
+    const record = await new Promise((resolve, reject) => {
+      const req = db.transaction(RECEIVED_DB_STORE, 'readonly').objectStore(RECEIVED_DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('file cache read failed'));
+    });
+    if (record && record.blob) receivedBlobCache.set(key, record);
+    return record;
+  } catch (e) { return null; }
+}
+
+async function downloadReceivedFile(itemId) {
+  // 文件可能在任一会话中接收，全局匹配；会话已关闭则查本机文件缓存
+  let found = null;
+  let key = '';
+  let name = '';
   for (const s of sessions.values()) {
     const item = s.receivedFiles.find(f => String(f.id) === String(itemId));
-    if (item && item.blob) {
-      downloadFile(item.blob, item.name);
-      return;
+    if (item) {
+      found = item;
+      name = item.name;
+      key = item.storageKey || receivedStorageKey(sessionDeviceCode(s), itemId);
+      if (item.blob) { downloadFile(item.blob, item.name); return; }
+      break;
     }
   }
-  // 会话已断开但文件仍保留过 → 查已关闭会话不可达，提示重新让发送方传输
-  showToast('文件数据已随连接关闭而释放', 'warning');
+  if (!key) {
+    const store = chatHistoryLoad();
+    for (const code of Object.keys(store)) {
+      const entry = (store[code] || []).find(e => e.dir === 'in' && String(e.id) === String(itemId));
+      if (entry) {
+        key = entry.storageKey || receivedStorageKey(code, itemId);
+        name = entry.name;
+        break;
+      }
+    }
+  }
+  const record = await readReceivedBlob(key);
+  if (record && record.blob) {
+    if (found) { found.blob = record.blob; found.persisted = true; }
+    downloadFile(record.blob, record.name || name || 'received-file');
+    return;
+  }
+  showToast('本机没有保存该文件的数据，请让对方重新发送', 'warning');
 }
 
 function downloadFile(blob, filename) {
