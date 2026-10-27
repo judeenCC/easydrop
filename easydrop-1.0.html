@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r11 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r11</button>
+                title="当前版本 v26.10.26-r12 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r12</button>
             </div>
           </div>
         </div>
@@ -2190,6 +2190,8 @@ let networkRecoveryTimer = null;
 let networkRecoveryRunning = false;
 let networkRecoveryAgain = false;
 let networkRecoveryUntil = 0;
+// 对端告知“我要换网重连了”：这段时间本端不抢先重拨，等对方拨回来
+const remoteNetResetUntil = new Map();
 
 function scheduleNetworkRecovery(reason) {
   networkRecoveryUntil = Date.now() + 120000;
@@ -2201,8 +2203,16 @@ async function recoverNetworkStack(reason) {
   if (networkRecoveryRunning) { networkRecoveryAgain = true; return; }
   networkRecoveryRunning = true;
   networkRecoveryAgain = false;
-  // 在清会话前记下对端识别码，重连不依赖旧的 sid（换网后 sid 可能已变）
-  const codes = [...new Set(Array.from(sessions.values()).map(sessionDeviceCode).filter(Boolean))];
+  // 在清会话前记下对端识别码、信令地址与发起方角色；换网端恢复后直接拨
+  // 已知的对端地址，不再按可能过期的候选列表逐个试错
+  const peers = [];
+  const seen = new Set();
+  Array.from(sessions.values()).forEach(s => {
+    const code = sessionDeviceCode(s);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    peers.push({ code: code, sid: s.key, initiator: s.isInitiator !== false });
+  });
   const savedCode = sessionCode;
   const hadCodePeer = !!codePeer; // 接收方正在输入连接码时没有 codePeer，不能反过来当宿主
   console.warn('网络恢复：重建信令与发现（' + reason + '）');
@@ -2213,8 +2223,12 @@ async function recoverNetworkStack(reason) {
     resetLanBus();
     initPresenceBeacon();
     // 网络切换后旧 ICE 路径不再可信：主动收尾，再只拨一条新连接。
-    // closeSession 不触发自动重拨，重拨统一在信令重新就绪后进行。
-    Array.from(sessions.values()).forEach(s => closeSession(s));
+    // 先告知对端“我要换网重连”，让它等本端拨回，而不是两边同时抢拨。
+    Array.from(sessions.values()).forEach(s => {
+      const code = sessionDeviceCode(s);
+      try { sendControl(s, { type: 'net-reset', code: myDeviceId || code }); } catch (e) { /* 旧通道已死：对端走兜底等待 */ }
+      closeSession(s);
+    });
     initializePeer(true); // 旧 socket 可能仍在服务器存活窗内，换新实例后缀避免 ID-TAKEN
     if (codePeer) {
       try { codePeer.destroy(); } catch (e) { /* noop */ }
@@ -2230,8 +2244,21 @@ async function recoverNetworkStack(reason) {
       initLanDiscovery();
     });
     const ok = await ensurePeerOpen(12000);
-    if (ok) codes.forEach(code => maybeAutoReconnect({ identity: { deviceId: code }, key: PEER_PREFIX_DEV + code }));
-    else showToast('网络已切换，信令仍在恢复，请稍后重试', 'warning');
+    if (ok) {
+      // 等对端 presence 心跳刷新（约 1 个周期）再定向重拨：双方同时换网时
+      // 各自的信令地址都变了，优先用信标里的最新地址而不是旧会话地址
+      peers.forEach((p, i) => setTimeout(() => {
+        const cands = resolvePeerSidCandidates(p.code);
+        const fresh = cands.find(x => x !== PEER_PREFIX_DEV + p.code);
+        const target = fresh || p.sid;
+        const bothReset = (remoteNetResetUntil.get(p.code) || 0) > Date.now();
+        if (bothReset && String(myDeviceId) > String(p.code)) {
+          maybeAutoReconnect({ identity: { deviceId: p.code }, key: target, isInitiator: false });
+        } else {
+          reconnectKnownSid(target, p.code);
+        }
+      }, 2000 + i * 400));
+    } else showToast('网络已切换，信令仍在恢复，请稍后重试', 'warning');
   } catch (e) {
     console.warn('网络恢复失败:', e);
     showToast('网络切换后连接恢复失败，请稍后重试', 'warning');
@@ -2262,13 +2289,22 @@ window.addEventListener('online', () => {
 });
 
 // WiFi A→WiFi B 时 connection.type 仍都是 wifi，补一个轻量 IP 变化探测。
-// 连续两次都是新 IP 才认定换网，避免虚拟网卡候选顺序抖动造成误重连。
+// 只在没有任何健康会话时才跑：健康连接绝不能因为“探测到另一个网卡”
+// 被拆掉（多网卡/热点切换期候选会来回跳，之前正是反复重连的来源）。
+// IP 变化也只刷新发现总线，不做会话级重建。
 let lanIpWatch = '';
 let lanIpCandidate = '';
 let lanIpProbeRunning = false;
+function resetDiscoveryAfterIpChange() {
+  lanIpCache = null;
+  resetLanBus();
+  initPresenceBeacon();
+  updateLanIpDisplay().then(() => initLanDiscovery());
+  if (!devicePeer || !devicePeer.open) scheduleNetworkRecovery('lan-ip-signaling');
+}
 async function probeLanIpChange() {
   if (document.hidden || lanIpProbeRunning || networkRecoveryRunning) return;
-  if (Array.from(sessions.values()).some(s => s.currentTransfer || s.currentReceive)) return;
+  if (Array.from(sessions.values()).some(isSessionAlive)) return; // 有健康连接就不碰网络栈
   lanIpProbeRunning = true;
   const previous = lanIpCache;
   lanIpCache = null;
@@ -2280,7 +2316,7 @@ async function probeLanIpChange() {
     if (lanIpCandidate !== ip) { lanIpCandidate = ip; return; }
     lanIpWatch = ip;
     lanIpCandidate = '';
-    scheduleNetworkRecovery('lan-ip-changed');
+    resetDiscoveryAfterIpChange();
   } else {
     lanIpWatch = ip;
     lanIpCandidate = '';
@@ -3196,6 +3232,36 @@ function retryDialWithNextCandidate() {
   return false;
 }
 
+// 换网恢复后的定向重拨：直接拨已知的对端信令地址（对端没换网，地址没变），
+// 不再按可能包含过期实例的候选列表逐个试错。失败时才退回候选轮换。
+function reconnectKnownSid(sid, code) {
+  try {
+    if (!sid || !code || !devicePeer || !devicePeer.open) return;
+    const existing = findSessionByDeviceId(code);
+    if (existing && isSessionAlive(existing)) return; // 对方已先拨回来
+    if (dialActive || dialingFriend || dialingCode) return;
+    const f = friends.find(fr => fr.deviceId === code);
+    dialActive = true;
+    dialFrom = null;
+    localsendDialTarget = null;
+    dialingFriend = {
+      name: f ? f.name : '对方设备',
+      deviceId: code,
+      from: null,
+      purpose: 'reconnect',
+      bannerText: '正在恢复连接...'
+    };
+    clearDialTimeout();
+    dialTimeout = setTimeout(() => failFriendDial('网络切换后自动重连超时，请手动重试'), 15000);
+    dialCandidates = [sid].concat(resolvePeerSidCandidates(code).filter(x => x !== sid));
+    dialCidIdx = 0;
+    openCandidateConn(sid, code, 'reconnect', '正在恢复连接...');
+  } catch (e) {
+    console.warn('定向重拨失败:', e);
+    try { endDial(); } catch (e2) { /* noop */ }
+  }
+}
+
 function setActiveSession(key) {
   activeSessionKey = key;
   const s = sessions.get(key);
@@ -3382,11 +3448,15 @@ function onSessionConnClosed(s) {
 // 非用户主动挂断的意外断开：按识别码排队重拨，而不是只尝试一次。
 // 换网期间 presence 可能还没来得及刷新，因此在恢复窗口内允许先拨；
 // 每个设备最多 4 次，成功后立即取消，避免抖动时无限重拨。
+// 原连接的发起方先拨（2 秒），被动方等 15 秒再兜底——两端同时拨
+// 会在换网期互相对撞，正是“重连成功几秒又断”的来源。
 const reconnectJobs = new Map();
 function maybeAutoReconnect(s) {
   const code = sessionDeviceCode(s);
   if (!code || reconnectJobs.has(code)) return;
   if (!isDeviceIdSeenLive(code) && Date.now() > networkRecoveryUntil) return;
+  const initiator = s.isInitiator !== false; // undefined 视作主动方
+  const remoteReset = (remoteNetResetUntil.get(code) || 0) > Date.now(); // 对端换网中，等它拨回
   const job = { attempts: 0, timer: null };
   reconnectJobs.set(code, job);
   const tick = () => {
@@ -3414,7 +3484,7 @@ function maybeAutoReconnect(s) {
     if (p && p.catch) p.catch(e => console.warn('自动重连失败:', e));
     job.timer = setTimeout(tick, job.attempts === 1 ? 8000 : 12000);
   };
-  job.timer = setTimeout(tick, 2000);
+  job.timer = setTimeout(tick, remoteReset ? 20000 : (initiator ? 2000 : 15000));
 }
 
 // ==================== Frame Protocol ====================
@@ -3504,6 +3574,10 @@ function handleControl(msg, s) {
       break;
     case 'pong':
       s.lastPong = Date.now();
+      break;
+    case 'net-reset':
+      // 对端确认换网、马上会拨回来：本端这段时间不抢先重拨，避免两端对撞
+      if (msg.code) remoteNetResetUntil.set(String(msg.code).slice(0, 16), Date.now() + 30000);
       break;
   }
 }
