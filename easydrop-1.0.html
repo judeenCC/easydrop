@@ -284,6 +284,20 @@ tailwind.config = {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   }
 
+  /* ==== 特性卡自适应：xl 起（横向宽度大/横屏）卡片拉伸铺满整行，描述文字单行显示 ==== */
+  @media (min-width: 1280px) {
+    #featuresSection .feature-card {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+    }
+    #featuresSection .feature-desc {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
   .modal-overlay {
     background: rgba(0, 0, 0, 0.3);
     backdrop-filter: blur(4px);
@@ -387,7 +401,7 @@ tailwind.config = {
 </div>
 
 <!-- Main Container -->
-<div class="relative z-10 min-h-screen flex flex-col">
+<div class="relative z-10 min-h-screen flex flex-col pb-28 md:pb-20">
 
   <!-- Header -->
   <header class="glass-strong border-b border-slate-200/50 sticky top-0 z-50">
@@ -402,8 +416,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r16 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r16</button>
+                title="当前版本 v26.10.26-r17 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r17</button>
             </div>
           </div>
         </div>
@@ -623,7 +637,6 @@ tailwind.config = {
       </div>
 
     </div>
-  </div>
 
     <!-- Chat Mode：会话常驻页。同一时间可存在多个连接（顶部会话条切换），不影响其他标签页操作 -->
     <div id="chatMode" class="hidden animate-fade-in">
@@ -731,38 +744,39 @@ tailwind.config = {
 
     </div>
 
-    <!-- Features Section：紧跟内容流（不再 mt-auto 沉底拉出大空位），底栏由 footer 自身 mt-auto 兜底 -->
-    <div id="featuresSection" class="mt-6 sm:mt-8 w-full max-w-[1680px] mx-auto flex flex-col md:flex-row md:justify-between gap-4 sm:gap-6">
-      <div class="glass rounded-2xl p-6 md:w-[calc(33.333%-1rem)] xl:w-[446px] flex-shrink-0">
+    <!-- Features Section：紧跟内容流（不再 mt-auto 沉底拉出大空位），底栏由 footer 固定于视口底部。
+         宽度自适应：<1280px 全宽卡片（横屏/平板下描述文字自然单行）；≥1280px 三列等分拉伸，描述单行+省略号 -->
+    <div id="featuresSection" class="mt-6 sm:mt-8 w-full max-w-[1680px] mx-auto flex flex-col xl:flex-row gap-4 sm:gap-6">
+      <div class="feature-card glass rounded-2xl p-6">
         <div class="flex items-start gap-5">
           <div class="w-14 h-14 rounded-2xl bg-primary-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-globe text-primary-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
             <h4 class="text-lg font-semibold text-slate-700 mb-2">跨网络传输</h4>
-            <p class="text-slate-400 text-sm">支持不同网络环境下的文件传输，深圳到上海，随时随地</p>
+            <p class="feature-desc text-slate-400 text-sm" title="支持不同网络环境下的文件传输，深圳到上海，随时随地">支持不同网络环境下的文件传输，深圳到上海，随时随地</p>
           </div>
         </div>
       </div>
-      <div class="glass rounded-2xl p-6 md:w-[calc(33.333%-1rem)] xl:w-[446px] flex-shrink-0">
+      <div class="feature-card glass rounded-2xl p-6">
         <div class="flex items-start gap-5">
           <div class="w-14 h-14 rounded-2xl bg-accent-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-shield-halved text-accent-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
             <h4 class="text-lg font-semibold text-slate-700 mb-2">端到端加密</h4>
-            <p class="text-slate-400 text-sm">基于 WebRTC 点对点技术，数据不经过第三方服务器</p>
+            <p class="feature-desc text-slate-400 text-sm" title="基于 WebRTC 点对点技术，数据不经过第三方服务器">基于 WebRTC 点对点技术，数据不经过第三方服务器</p>
           </div>
         </div>
       </div>
-      <div class="glass rounded-2xl p-6 md:w-[calc(33.333%-1rem)] xl:w-[446px] flex-shrink-0">
+      <div class="feature-card glass rounded-2xl p-6">
         <div class="flex items-start gap-5">
           <div class="w-14 h-14 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
             <i class="fas fa-users text-purple-500 text-3xl"></i>
           </div>
           <div class="flex-1 min-w-0">
             <h4 class="text-lg font-semibold text-slate-700 mb-2">好友快捷传输</h4>
-            <p class="text-slate-400 text-sm">添加常用设备为好友，后续传输一键直达</p>
+            <p class="feature-desc text-slate-400 text-sm" title="添加常用设备为好友，后续传输一键直达">添加常用设备为好友，后续传输一键直达</p>
           </div>
         </div>
       </div>
@@ -835,8 +849,8 @@ tailwind.config = {
     </div>
   </main>
 
-  <!-- Footer -->
-  <footer class="glass-strong border-t border-slate-200/50 mt-auto">
+  <!-- Footer：固定在视口底部，不随页面滚动 -->
+  <footer class="glass-strong border-t border-slate-200/50 fixed bottom-0 inset-x-0 z-40">
     <div class="px-4 sm:px-6 lg:px-8 py-6">
       <div class="flex flex-col md:flex-row items-center justify-between gap-4">
         <p class="text-slate-400 text-sm">© <span id="footerYear">2026</span> EasyDrop · 基于 WebRTC 技术</p>
@@ -923,7 +937,7 @@ tailwind.config = {
 </div>
 
 <!-- Toast Container -->
-<div id="toastContainer" class="fixed inset-x-4 bottom-4 sm:inset-x-auto sm:bottom-6 sm:right-6 z-[80] space-y-3 flex flex-col items-stretch sm:items-end"></div>
+<div id="toastContainer" class="fixed inset-x-4 bottom-28 md:bottom-24 sm:inset-x-auto sm:right-6 z-[80] space-y-3 flex flex-col items-stretch sm:items-end"></div>
 
 <script>
 // ==================== Global State ====================
