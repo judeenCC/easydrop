@@ -3573,11 +3573,6 @@ function createSession(conn, opts) {
   const handleOpen = () => {
     if (s.closed) return;
     markRecentSessionPeer(s);
-    // 记录这次会话用过的传输方式（LocalSend / WebRTC），
-    // 用于头像右下角状态点的颜色与后续默认选择
-    const meta = (conn && conn.metadata) || {};
-    const mode = meta.transferMode || (opts.dialPurpose === 'localsend' ? 'lan' : 'cross');
-    markFriendTransferMode(sessionDeviceCode(s), mode);
     updateConnectionStatus();
     // 会话归属：主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
     if (s.isInitiator || s.userConfirm) {
@@ -3802,6 +3797,11 @@ function onRemoteHello(msg, s) {
   // 会话在聊天页激活时才更新头部与消息流；chips 始终即时刷新
   renderSessionChips();
   if (activeSessionKey === s.key && currentTab === 'chat') renderChat(true);
+
+  // 记录这次会话用过的传输方式（LocalSend / WebRTC），
+  // 用于头像右下角状态点颜色与后续默认选择；这里 identity 已就绪
+  const meta = (s.conn && s.conn.metadata) || {};
+  markFriendTransferMode(deviceId, meta.transferMode || 'cross');
 
   if (existing) {
     // 已是好友，无需提示
