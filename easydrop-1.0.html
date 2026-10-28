@@ -402,13 +402,17 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r12 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r12</button>
+                title="当前版本 v26.10.26-r13 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r13</button>
             </div>
           </div>
         </div>
 
         <div class="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+          <button onclick="showOnlineLegend()" id="onlineLegendBtn" class="w-10 h-10 flex-shrink-0 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all" title="好友在线颜色说明">
+            <i class="fas fa-circle-info text-slate-500"></i>
+          </button>
+
           <button onclick="refreshOnlineDevices()" id="refreshDevicesBtn" class="w-10 h-10 flex-shrink-0 rounded-xl glass hover:bg-slate-100 flex items-center justify-center transition-all" title="刷新在线设备信息（广播本机心跳并重新发现）">
             <i id="refreshDevicesIcon" class="fas fa-rotate-right text-slate-500"></i>
           </button>
@@ -905,6 +909,19 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- Choice Modal（传输方式选择 / 在线颜色说明） -->
+<div id="choiceModal" class="hidden fixed inset-0 z-[75] flex items-center justify-center p-4 modal-overlay">
+  <div class="glass-strong rounded-3xl p-6 max-w-md w-full animate-slide-up modal-panel">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <h3 class="text-lg font-semibold text-slate-800" id="choiceModalTitle">选择传输方式</h3>
+      <button onclick="closeChoiceModal()" class="w-8 h-8 rounded-lg glass hover:bg-slate-100 flex items-center justify-center">
+        <i class="fas fa-xmark text-slate-500"></i>
+      </button>
+    </div>
+    <div id="choiceModalContent"></div>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div id="toastContainer" class="fixed inset-x-4 bottom-4 sm:inset-x-auto sm:bottom-6 sm:right-6 z-[80] space-y-3 flex flex-col items-stretch sm:items-end"></div>
 
@@ -928,6 +945,7 @@ let codeExpiry = 300;
 let codeRetry = 0;
 let stableIdRetry = 0;
 let currentFriendId = null;
+let friendActionModalMode = null; // 'actions' = 好友操作弹窗；'incoming' = 入站连接确认弹窗
 
 // 设备身份（持久化）：4 位识别码 + 昵称，用于好友识别、直连与 LocalSend 发现
 let myDeviceId = '';             // 4 位识别码（数字+大写字母），同时是 PeerJS 注册 ID 与连接地址参数
@@ -1194,6 +1212,10 @@ async function loadFriends() {
     friends.forEach(f => {
       f.id = safeId(f.id);
       if (f.deviceId) f.deviceId = safeId(f.deviceId);
+      // 传输方式经历（LocalSend / WebRTC）与记住的默认选择
+      if (typeof f.lanUsed !== 'boolean') f.lanUsed = false;
+      if (typeof f.crossUsed !== 'boolean') f.crossUsed = false;
+      if (f.preferredTransfer !== 'lan' && f.preferredTransfer !== 'cross') f.preferredTransfer = null;
     });
     // 旧版 UUID 设备 ID 已作废（新版为 4 位识别码），清理无法再接通的旧好友
     const before = friends.length;
@@ -1305,16 +1327,17 @@ function renderFriendsList() {
 
     const row = document.createElement('div');
     row.className = 'glass rounded-2xl px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-white/70 transition-all';
-    row.onclick = () => connectToFriend(friend.id);
+    row.onclick = () => initiateFriendTransfer(friend.id);
     row.innerHTML = `
-      <div class="friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+      <div class="relative friend-avatar w-11 h-11 rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
         ${esc(initials)}
+        <span data-friend-dot="${esc(friend.deviceId || '')}" class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white bg-slate-300"></span>
       </div>
       <div class="flex-1 min-w-0">
         <h4 class="font-semibold text-slate-800 truncate">${esc(friend.name)}</h4>
         <p class="text-xs text-slate-400 mt-0.5">${lastTransferText}</p>
       </div>
-      <button data-friend-plane="${esc(friend.deviceId || '')}" onclick="event.stopPropagation(); connectToFriend('${friend.id}')" class="w-10 h-10 rounded-xl flex items-center justify-center transition-all flex-shrink-0" title="发起传输">
+      <button data-friend-plane="${esc(friend.deviceId || '')}" onclick="event.stopPropagation(); initiateFriendTransfer('${friend.id}')" class="w-10 h-10 rounded-xl flex items-center justify-center transition-all flex-shrink-0" title="发起传输">
         <i class="fas fa-paper-plane"></i>
       </button>
       <button onclick="event.stopPropagation(); showFriendActions('${friend.id}')" class="w-8 h-8 rounded-lg hover:bg-slate-200/70 flex items-center justify-center transition-all flex-shrink-0 text-slate-400 text-base leading-none" title="更多操作">⋯</button>
@@ -1336,10 +1359,142 @@ function isFriendOnline(friend) {
   return isDeviceIdSeenLive(friend.deviceId);
 }
 
+// ==================== 传输方式经历 / 状态点颜色 ====================
+// 记录这次会话用过的传输方式（LocalSend / WebRTC）：
+// 用于头像右下角状态点的颜色，以及“两种都用过”时的默认选择
+function markFriendTransferMode(code, mode) {
+  if (!code) return;
+  const f = friends.find(fr => fr.deviceId === code);
+  if (!f) return;
+  if (mode === 'lan' && !f.lanUsed) {
+    f.lanUsed = true;
+    saveFriends();
+  } else if (mode === 'cross' && !f.crossUsed) {
+    f.crossUsed = true;
+    saveFriends();
+  }
+  updateFriendOnlineIndicators();
+}
+
+// 状态点颜色：绿=LocalSend 在线；蓝=WebRTC 在线；紫=两种都用过；灰=离线
+function friendTransferStatus(f) {
+  if (!f || !f.deviceId) return 'gray';
+  const lanOnline = lanPeersLive().some(rec => rec.id === f.deviceId);
+  const crossOnline = Array.from(presencePeersLive().values()).some(rec => rec.id === f.deviceId);
+  if (!lanOnline && !crossOnline) return 'gray';
+  if (f.lanUsed && f.crossUsed) return 'purple';
+  if (lanOnline) return 'green';
+  return 'blue';
+}
+
+// 点击好友行/纸飞机：按状态点颜色选择传输方式；
+// 紫色时若有记住的选择就直接用，否则弹出选择框
+function initiateFriendTransfer(friendId) {
+  const f = friends.find(x => x.id === friendId);
+  if (!f) return;
+  // 好友操作弹窗打开时点“发起传输”，先把操作弹窗收掉，避免两层弹窗叠加
+  if (friendActionModalMode === 'actions') closeFriendModal();
+  const status = friendTransferStatus(f);
+  if (status === 'green') return connectToFriend(friendId, 'localsend');
+  if (status === 'blue') return connectToFriend(friendId, null);
+  if (status === 'purple') {
+    if (f.preferredTransfer === 'lan') return connectToFriend(friendId, 'localsend');
+    if (f.preferredTransfer === 'cross') return connectToFriend(friendId, null);
+    return showTransferModeModal(friendId);
+  }
+  // 离线：有记住的选择就按它来，否则默认 WebRTC
+  if (f.preferredTransfer === 'lan') return connectToFriend(friendId, 'localsend');
+  return connectToFriend(friendId, null);
+}
+
+function showTransferModeModal(friendId) {
+  const f = friends.find(x => x.id === friendId);
+  if (!f) return;
+  const colors = f.avatarColors || avatarColors[0];
+  const initials = (f.name || '?').charAt(0).toUpperCase();
+  openChoiceModal('选择传输方式', `
+    <div class="text-center mb-5">
+      <div class="friend-avatar w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold mx-auto mb-2" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
+        ${esc(initials)}
+      </div>
+      <h4 class="font-semibold text-slate-800">${esc(f.name)}</h4>
+    </div>
+    <div class="space-y-3">
+      <button onclick="chooseTransferMode('${f.id}', 'lan')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-wifi"></i>
+        发起文件传输 LocalSend
+      </button>
+      <button onclick="chooseTransferMode('${f.id}', 'cross')" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-globe"></i>
+        发起文件传输 WebRTC
+      </button>
+      <label class="flex items-center gap-2 text-xs text-slate-500 mt-1">
+        <input type="checkbox" id="rememberTransferMode" class="rounded">
+        记住我的选择（以后自动使用）
+      </label>
+    </div>
+  `);
+}
+
+function chooseTransferMode(friendId, mode) {
+  const f = friends.find(x => x.id === friendId);
+  const remember = document.getElementById('rememberTransferMode');
+  if (f && remember && remember.checked) {
+    f.preferredTransfer = mode;
+    saveFriends();
+    showToast('已记住默认传输方式', 'success');
+  }
+  closeChoiceModal();
+  connectToFriend(friendId, mode === 'lan' ? 'localsend' : null);
+}
+
+// 好友在线颜色说明（顶部信息按钮）
+function showOnlineLegend() {
+  openChoiceModal('好友在线颜色说明', `
+    <div class="space-y-4 text-sm text-slate-600">
+      <div class="flex items-center gap-3">
+        <span class="w-3 h-3 rounded-full bg-green-500"></span>
+        <span>绿色：LocalSend 在线（同一局域网）</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="w-3 h-3 rounded-full bg-blue-500"></span>
+        <span>蓝色：WebRTC 在线（跨网络）</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="w-3 h-3 rounded-full bg-purple-500"></span>
+        <span>紫色：LocalSend + WebRTC 都用过</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="w-3 h-3 rounded-full bg-slate-300"></span>
+        <span>灰色：当前未检测到对方在线</span>
+      </div>
+      <p class="text-xs text-slate-400 mt-2">状态点位于好友头像右下角；点击卡片或纸飞机会按当前颜色对应的传输方式发起连接。</p>
+    </div>
+  `);
+}
+
+// ==================== 通用选择弹窗 ====================
+function openChoiceModal(title, html) {
+  const modal = document.getElementById('choiceModal');
+  const titleEl = document.getElementById('choiceModalTitle');
+  const content = document.getElementById('choiceModalContent');
+  if (!modal || !titleEl || !content) return;
+  titleEl.textContent = title;
+  content.innerHTML = html;
+  modal.classList.remove('hidden');
+}
+
+function closeChoiceModal() {
+  const modal = document.getElementById('choiceModal');
+  if (modal) modal.classList.add('hidden');
+}
+
 function updateFriendOnlineIndicators() {
   document.querySelectorAll('[data-friend-plane]').forEach(btn => {
     const id = btn.getAttribute('data-friend-plane');
-    const online = isDeviceIdSeenLive(id);
+    const friend = friends.find(f => f.deviceId === id);
+    const status = friendTransferStatus(friend);
+    const online = status !== 'gray';
     btn.classList.toggle('bg-primary-500', online);
     btn.classList.toggle('hover:bg-primary-600', online);
     btn.classList.toggle('shadow-md', online);
@@ -1349,8 +1504,21 @@ function updateFriendOnlineIndicators() {
       icon.classList.toggle('text-white', online);
       icon.classList.toggle('text-slate-400', !online);
     }
-    // 灰色仅代表信标未发现（可能因对方域总线未连通），点击仍会尝试直连
-    btn.title = online ? '对方在线，点击直接发起传输' : '未检测到对方在线，点击仍会尝试连接';
+    // 状态点在头像右下角：绿=LocalSend，蓝=WebRTC，紫=两种都用过
+    const dot = document.querySelector('[data-friend-dot="' + (id || '') + '"]');
+    if (dot) {
+      dot.classList.toggle('bg-green-500', status === 'green');
+      dot.classList.toggle('bg-blue-500', status === 'blue');
+      dot.classList.toggle('bg-purple-500', status === 'purple');
+      dot.classList.toggle('bg-slate-300', status === 'gray');
+    }
+    btn.title = status === 'green'
+      ? 'LocalSend 在线 · 点击发起 LocalSend 传输'
+      : status === 'blue'
+        ? 'WebRTC 在线 · 点击发起 WebRTC 传输'
+        : status === 'purple'
+          ? 'LocalSend + WebRTC 都用过 · 点击选择传输方式'
+          : '未检测到对方在线 · 点击仍会尝试连接';
   });
 }
 
@@ -1393,6 +1561,7 @@ function showFriendActions(friendId) {
   if (!friend) return;
 
   currentFriendId = friendId;
+  friendActionModalMode = 'actions';
   const modal = document.getElementById('friendActionModal');
   const title = document.getElementById('friendModalTitle');
   const content = document.getElementById('friendModalContent');
@@ -1413,9 +1582,14 @@ function showFriendActions(friendId) {
     </div>
 
     <div class="space-y-3">
-      <button onclick="connectToFriend('${friend.id}')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
-        <i class="fas fa-bolt"></i>
-        发起文件传输（一键直连）
+      <button onclick="connectToFriend('${friend.id}', 'localsend')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-wifi"></i>
+        发起文件传输 LocalSend
+      </button>
+
+      <button onclick="connectToFriend('${friend.id}', null)" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-globe"></i>
+        发起文件传输 WebRTC
       </button>
 
       <button onclick="showRenameForm('${friend.id}')" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
@@ -1507,6 +1681,7 @@ function rejectIncomingConn(conn) {
 function closeFriendModal() {
   document.getElementById('friendActionModal').classList.add('hidden');
   currentFriendId = null;
+  friendActionModalMode = null;
   // 弹窗被 overlay 点击/Esc 关闭时，视为拒绝未处理的连接请求
   if (pendingIncomingConn) {
     const conn = pendingIncomingConn;
@@ -2203,16 +2378,6 @@ async function recoverNetworkStack(reason) {
   if (networkRecoveryRunning) { networkRecoveryAgain = true; return; }
   networkRecoveryRunning = true;
   networkRecoveryAgain = false;
-  // 在清会话前记下对端识别码、信令地址与发起方角色；换网端恢复后直接拨
-  // 已知的对端地址，不再按可能过期的候选列表逐个试错
-  const peers = [];
-  const seen = new Set();
-  Array.from(sessions.values()).forEach(s => {
-    const code = sessionDeviceCode(s);
-    if (!code || seen.has(code)) return;
-    seen.add(code);
-    peers.push({ code: code, sid: s.key, initiator: s.isInitiator !== false });
-  });
   const savedCode = sessionCode;
   const hadCodePeer = !!codePeer; // 接收方正在输入连接码时没有 codePeer，不能反过来当宿主
   console.warn('网络恢复：重建信令与发现（' + reason + '）');
@@ -2222,22 +2387,31 @@ async function recoverNetworkStack(reason) {
     lanIpCache = null;
     resetLanBus();
     initPresenceBeacon();
-    // 网络切换后旧 ICE 路径不再可信：主动收尾，再只拨一条新连接。
-    // 先告知对端“我要换网重连”，让它等本端拨回，而不是两边同时抢拨。
-    Array.from(sessions.values()).forEach(s => {
-      const code = sessionDeviceCode(s);
-      try { sendControl(s, { type: 'net-reset', code: myDeviceId || code }); } catch (e) { /* 旧通道已死：对端走兜底等待 */ }
-      closeSession(s);
-    });
-    initializePeer(true); // 旧 socket 可能仍在服务器存活窗内，换新实例后缀避免 ID-TAKEN
-    if (codePeer) {
-      try { codePeer.destroy(); } catch (e) { /* noop */ }
-      codePeer = null;
-    }
-    if (savedCode && hadCodePeer) {
-      sessionCode = savedCode;
-      codeRetry = 0;
-      createCodePeer();
+    const hasLive = Array.from(sessions.values()).some(isSessionAlive);
+    const dialing = !!(dialActive || dialingFriend || dialingCode);
+    if (!hasLive && !dialing) {
+      // 没有需要保护的连接：完整重建信令注册（旧 socket 可能仍在服务器存活窗内）
+      initializePeer(true);
+      if (codePeer) {
+        try { codePeer.destroy(); } catch (e) { /* noop */ }
+        codePeer = null;
+      }
+      if (savedCode && hadCodePeer) {
+        sessionCode = savedCode;
+        codeRetry = 0;
+        createCodePeer();
+      }
+    } else {
+      // 有活会话 / 正在拨号：绝不主动拆连接，也不主动断开信令。
+      // PeerJS 的 disconnect() 会连带关掉已建立的 P2P 会话，这正是
+      // “切换网络导致连接断开”的来源。这里只刷新发现总线，信令若真
+      // 掉线会自己触发 disconnected → reconnect，不影响已建立的 P2P。
+      if (devicePeer && !devicePeer.destroyed && !devicePeer.open) {
+        try { devicePeer.reconnect(); } catch (e) { /* noop */ }
+      }
+      if (codePeer && !codePeer.destroyed && !codePeer.open) {
+        try { codePeer.reconnect(); } catch (e) { /* noop */ }
+      }
     }
     updateLanIpDisplay().then(() => {
       if (lanIpCache) lanIpWatch = lanIpCache;
@@ -2245,19 +2419,22 @@ async function recoverNetworkStack(reason) {
     });
     const ok = await ensurePeerOpen(12000);
     if (ok) {
-      // 等对端 presence 心跳刷新（约 1 个周期）再定向重拨：双方同时换网时
-      // 各自的信令地址都变了，优先用信标里的最新地址而不是旧会话地址
-      peers.forEach((p, i) => setTimeout(() => {
-        const cands = resolvePeerSidCandidates(p.code);
-        const fresh = cands.find(x => x !== PEER_PREFIX_DEV + p.code);
-        const target = fresh || p.sid;
-        const bothReset = (remoteNetResetUntil.get(p.code) || 0) > Date.now();
-        if (bothReset && String(myDeviceId) > String(p.code)) {
-          maybeAutoReconnect({ identity: { deviceId: p.code }, key: target, isInitiator: false });
-        } else {
-          reconnectKnownSid(target, p.code);
-        }
-      }, 2000 + i * 400));
+      // 立刻 ping 一轮；若 12 秒仍无 pong，说明旧路径真的死了，再重拨。
+      // 活着的连接完全不受影响，死掉的连接也能快速恢复。
+      sessions.forEach(s => {
+        if (s.closed || !s.conn || !s.conn.open) return;
+        try { sendControl(s, { type: 'ping' }); } catch (e) { /* 半死通道留给下面的兜底 */ }
+      });
+      setTimeout(() => {
+        sessions.forEach(s => {
+          if (s.closed || !s.conn || !s.conn.open) return;
+          if (Date.now() - (s.lastPong || 0) <= 12000) return; // 还活着
+          const code = sessionDeviceCode(s);
+          const sid = s.key;
+          closeSession(s);
+          if (code) reconnectKnownSid(sid, code);
+        });
+      }, 12000);
     } else showToast('网络已切换，信令仍在恢复，请稍后重试', 'warning');
   } catch (e) {
     console.warn('网络恢复失败:', e);
@@ -2274,6 +2451,7 @@ function handleNetworkStackChange() {
   if (!t || t === lastNetType) return; // effectiveType 抖动不当作换网
   const prev = lastNetType;
   lastNetType = t;
+  if (!prev) return; // 首次类型上报不当作换网：这是首次连接后无故断开的来源
   clearTimeout(netChangeDebounce);
   netChangeDebounce = setTimeout(() => scheduleNetworkRecovery(prev + '→' + t), 2500);
 }
@@ -2283,9 +2461,8 @@ if (navigator.connection && navigator.connection.addEventListener) {
 window.addEventListener('online', () => {
   initPresenceBeacon();
   sessionHealthTick();
-  // 从 offline 恢复时重建；正常在线且仍有健康会话不主动拆连接
-  const hasLive = Array.from(sessions.values()).some(x => isSessionAlive(x));
-  if (!hasLive || !devicePeer || !devicePeer.open) scheduleNetworkRecovery('online');
+  // 仅在信令确实没就绪时才做网络恢复，避免刚连上就被无谓地重建
+  if (!devicePeer || !devicePeer.open) scheduleNetworkRecovery('online');
 });
 
 // WiFi A→WiFi B 时 connection.type 仍都是 wifi，补一个轻量 IP 变化探测。
@@ -2304,6 +2481,7 @@ function resetDiscoveryAfterIpChange() {
 }
 async function probeLanIpChange() {
   if (document.hidden || lanIpProbeRunning || networkRecoveryRunning) return;
+  if (dialActive || dialingFriend || dialingCode) return; // 拨号中不探测，避免首次连接被误拆
   if (Array.from(sessions.values()).some(isSessionAlive)) return; // 有健康连接就不碰网络栈
   lanIpProbeRunning = true;
   const previous = lanIpCache;
@@ -2525,6 +2703,7 @@ function showIncomingRequestModal(opts) {
   const safeName = name ? name.slice(0, 40) : ('设备 ' + (opts.callerId ? opts.callerId.slice(0, 8) : '未知'));
   const isFriend = !!opts.isFriend;
 
+  friendActionModalMode = 'incoming';
   title.textContent = '连接请求';
   content.innerHTML = `
     <div class="text-center mb-6">
@@ -3054,7 +3233,10 @@ async function generateAnswer() {
   clearDialTimeout();
   dialTimeout = setTimeout(() => failCodeDial('连接超时，请确认连接码是否正确'), 25000);
 
-  const conn = devicePeer.connect(PEER_PREFIX_CODE + inputCode, { reliable: true });
+  const conn = devicePeer.connect(PEER_PREFIX_CODE + inputCode, {
+    reliable: true,
+    metadata: { deviceName: myDeviceName, deviceId: myDeviceId, transferMode: 'cross' }
+  });
   pendingDialConn = conn;
   conn.on('open', () => {
     if (!dialingCode) { try { conn.close(); } catch (e) { /* noop */ } return; }
@@ -3201,9 +3383,13 @@ function nextDialCandidate() {
 
 // 向单个候选信令 ID 发起设备直连（connectToFriend / dialDevice 共用尾部逻辑）
 function openCandidateConn(sid, deviceId, purpose, bannerText) {
+  // LocalSend / WebRTC 两种链路都会随连接元数据带给对端，
+  // 对端据此把这次会话归入对应“传输方式经历”，用于状态点颜色与默认选择
+  const from = (dialingFriend && dialingFriend.from) || dialFrom || null;
+  const transferMode = from === 'localsend' ? 'lan' : 'cross';
   const conn = devicePeer.connect(sid, {
     reliable: true,
-    metadata: { deviceName: myDeviceName, deviceId: myDeviceId }
+    metadata: { deviceName: myDeviceName, deviceId: myDeviceId, transferMode: transferMode }
   });
   pendingDialConn = conn;
   conn.on('open', () => {
@@ -3387,6 +3573,11 @@ function createSession(conn, opts) {
   const handleOpen = () => {
     if (s.closed) return;
     markRecentSessionPeer(s);
+    // 记录这次会话用过的传输方式（LocalSend / WebRTC），
+    // 用于头像右下角状态点的颜色与后续默认选择
+    const meta = (conn && conn.metadata) || {};
+    const mode = meta.transferMode || (opts.dialPurpose === 'localsend' ? 'lan' : 'cross');
+    markFriendTransferMode(sessionDeviceCode(s), mode);
     updateConnectionStatus();
     // 会话归属：主动发起（或用户已确认）→ 激活并切到聊天页；纯被动接收 → 不打断当前操作
     if (s.isInitiator || s.userConfirm) {
@@ -5359,8 +5550,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  document.getElementById('choiceModal').addEventListener('click', (e) => {
+    if (e.target.id === 'choiceModal') {
+      closeChoiceModal();
+    }
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      const choiceModal = document.getElementById('choiceModal');
+      if (choiceModal && !choiceModal.classList.contains('hidden')) {
+        closeChoiceModal();
+        return;
+      }
       document.getElementById('settingsModal').classList.add('hidden');
       closeFriendModal();
       goHome();
