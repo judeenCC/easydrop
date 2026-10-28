@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r15 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r15</button>
+                title="当前版本 v26.10.26-r16 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r16</button>
             </div>
           </div>
         </div>
@@ -1331,7 +1331,7 @@ function renderFriendsList() {
     row.innerHTML = `
       <div class="relative friend-avatar w-[48.4px] h-[48.4px] rounded-full flex items-center justify-center text-white text-base font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
         ${esc(initials)}
-        <div data-friend-dot="${esc(friend.deviceId || '')}" class="group absolute -bottom-1 -right-1 w-[22.8px] h-[22.8px] rounded-full border-2 border-white bg-slate-300">
+        <div data-friend-dot="${esc(friend.deviceId || '')}" class="group absolute -bottom-1 -right-1 w-[18.24px] h-[18.24px] rounded-full border-2 border-white bg-slate-300">
           <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center pointer-events-none">
             <span data-friend-dot-text class="px-2 py-1 rounded-lg bg-slate-900/90 text-white text-[11px] whitespace-nowrap shadow-lg">当前：离线</span>
           </div>
@@ -1473,6 +1473,10 @@ function showOnlineLegend() {
         <span>灰色：当前未检测到对方在线</span>
       </div>
       <p class="text-xs text-slate-400 mt-2">状态点位于好友头像右下角；点击卡片或纸飞机会按当前颜色对应的传输方式发起连接。</p>
+      <div class="flex items-start gap-2 mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700">
+        <i class="fas fa-circle-exclamation mt-0.5"></i>
+        <p class="text-xs leading-relaxed">提示：清除浏览器数据、卸载浏览器或使用无痕模式，都会清除本机保存的好友、会话记录与接收文件缓存，且无法恢复。</p>
+      </div>
     </div>
   `);
 }
