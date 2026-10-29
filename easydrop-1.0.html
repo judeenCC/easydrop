@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r19 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r19</button>
+                title="当前版本 v26.10.29-r20 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.29-r20</button>
             </div>
           </div>
         </div>
@@ -3655,12 +3655,48 @@ function createSession(conn, opts) {
 
   conn.on('data', (data) => handleFrame(data, s));
 
+  attachIceStateTrace(s); // 底层 RTCPeerConnection 状态机轨迹（排查文章第一项）
+
   conn.on('close', () => onSessionConnClosed(s));
 
   conn.on('error', (err) => {
     console.error('数据通道错误:', err);
   });
   return s;
+}
+
+// ICE 状态轨迹监控：连接不稳九成是 ICE 层的事（候选失效/对撞/NAT 回收），
+// 而底层 RTCPeerConnection 平时完全不可见——之前只能靠 40s 应用层心跳
+// 事后判死。这里挂原生监听，把状态机全程打进 console：
+// - failed：candidate pair 确定死亡 → 不等 40s，立即收尾并自动重拨（秒级恢复）
+// - disconnected：短暂抖动，WebRTC 会自行恢复，只记日志交给心跳兜底
+// - checking 长期卡住：握手 45s 兜底（SESSION_HANDSHAKE_GRACE_MS）已覆盖
+function handleIceConnectionState(s, st) {
+  if (!s || s.closed) return;
+  if (st === 'failed') {
+    console.warn('ICE 状态 failed，立即收尾会话:', s.key);
+    const name = sessionDisplayName(s);
+    closeSession(s);
+    showToast('与 ' + esc(name) + ' 的连接已断开', 'warning');
+    maybeAutoReconnect(s);
+  } else if (st === 'disconnected') {
+    console.warn('ICE 状态 disconnected（抖动观察中，交心跳兜底）:', s.key);
+  }
+}
+
+function attachIceStateTrace(s) {
+  try {
+    const pc = s.conn && s.conn.peerConnection;
+    if (!pc || typeof pc.addEventListener !== 'function') return;
+    pc.addEventListener('iceconnectionstatechange', () => {
+      console.log('[ICE轨迹]', s.key, 'ice=' + pc.iceConnectionState);
+      handleIceConnectionState(s, pc.iceConnectionState);
+    });
+    pc.addEventListener('connectionstatechange', () => {
+      console.log('[ICE轨迹]', s.key, 'pc=' + pc.connectionState);
+      handleIceConnectionState(s, pc.connectionState);
+    });
+  } catch (e) { /* noop */ }
 }
 
 function onSessionConnClosed(s) {
