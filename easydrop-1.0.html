@@ -402,8 +402,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.26-r18 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r18</button>
+                title="当前版本 v26.10.26-r19 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.26-r19</button>
             </div>
           </div>
         </div>
@@ -2360,6 +2360,7 @@ function schedulePresenceRetry() {
 // 几秒内蓝点恢复，而不是等下一个重试周期
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    giveWakeGrace(); // 先给唤醒宽限：回前台瞬间心跳还没解冻恢复，别急着判死
     initPresenceBeacon();
     sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
   }
@@ -2390,7 +2391,8 @@ async function recoverNetworkStack(reason) {
   const savedCode = sessionCode;
   const hadCodePeer = !!codePeer; // 接收方正在输入连接码时没有 codePeer，不能反过来当宿主
   console.warn('网络恢复：重建信令与发现（' + reason + '）');
-  showToast('检测到网络切换，正在恢复连接…', 'info');
+  // 静默优先：「检测到网络切换」toast 只在真正要全量重建时再弹，
+  // 避免只是回后台/亮屏被误报为换网。
   try {
     rememberSignaling(0); // 不允许一次抖动把设备留在被墙的备用云端
     lanIpCache = null;
@@ -2399,6 +2401,7 @@ async function recoverNetworkStack(reason) {
     const hasLive = Array.from(sessions.values()).some(isSessionAlive);
     const dialing = !!(dialActive || dialingFriend || dialingCode);
     if (!hasLive && !dialing) {
+      showToast('检测到网络切换，正在恢复连接…', 'info');
       // 没有需要保护的连接：完整重建信令注册（旧 socket 可能仍在服务器存活窗内）
       initializePeer(true);
       if (codePeer) {
@@ -2438,6 +2441,7 @@ async function recoverNetworkStack(reason) {
         sessions.forEach(s => {
           if (s.closed || !s.conn || !s.conn.open) return;
           if (Date.now() - (s.lastPong || 0) <= 12000) return; // 还活着
+          if (Date.now() < (s.wakeGraceUntil || 0)) return; // 唤醒宽限内不快杀，交给下轮巡检
           const code = sessionDeviceCode(s);
           const sid = s.key;
           closeSession(s);
@@ -2461,6 +2465,17 @@ function handleNetworkStackChange() {
   const prev = lastNetType;
   lastNetType = t;
   if (!prev) return; // 首次类型上报不当作换网：这是首次连接后无故断开的来源
+  if (t === 'none' || t === 'unknown') {
+    // 省电策略/系统瞬时上报：type 可能瞬间跳到 none 又弹回来。
+    // 延迟 6 秒复查，回弹则取消；持续 none 才真正当作断网走恢复。
+    clearTimeout(netChangeDebounce);
+    netChangeDebounce = setTimeout(() => {
+      const cur = (navigator.connection && navigator.connection.type) || '';
+      if (cur !== t) return; // 已回弹，虚惊一场
+      scheduleNetworkRecovery(prev + '→' + t);
+    }, 6000);
+    return;
+  }
   clearTimeout(netChangeDebounce);
   netChangeDebounce = setTimeout(() => scheduleNetworkRecovery(prev + '→' + t), 2500);
 }
@@ -2468,10 +2483,18 @@ if (navigator.connection && navigator.connection.addEventListener) {
   navigator.connection.addEventListener('change', handleNetworkStackChange);
 }
 window.addEventListener('online', () => {
+  giveWakeGrace(); // 手机休眠唤醒常伴随 online 事件：同样先给宽限
   initPresenceBeacon();
   sessionHealthTick();
-  // 仅在信令确实没就绪时才做网络恢复，避免刚连上就被无谓地重建
-  if (!devicePeer || !devicePeer.open) scheduleNetworkRecovery('online');
+  // 仅在信令确实没就绪时才考虑网络恢复；先静默自检 12 秒，
+  // 能自己恢复注册就不重建（避免后台唤醒被误报为换网）。
+  if (!devicePeer || !devicePeer.open) {
+    ensurePeerOpen(12000).then((ok) => {
+      if (!ok && devicePeer && !devicePeer.open && !networkRecoveryRunning) {
+        scheduleNetworkRecovery('online');
+      }
+    });
+  }
 });
 
 // WiFi A→WiFi B 时 connection.type 仍都是 wifi，补一个轻量 IP 变化探测。
@@ -2486,7 +2509,14 @@ function resetDiscoveryAfterIpChange() {
   resetLanBus();
   initPresenceBeacon();
   updateLanIpDisplay().then(() => initLanDiscovery());
-  if (!devicePeer || !devicePeer.open) scheduleNetworkRecovery('lan-ip-signaling');
+  if (!devicePeer || !devicePeer.open) {
+    // 信令还活着就别重建；先静默自检 12 秒，确实救不回来再走网络恢复
+    ensurePeerOpen(12000).then((ok) => {
+      if (!ok && devicePeer && !devicePeer.open && !networkRecoveryRunning) {
+        scheduleNetworkRecovery('lan-ip-signaling');
+      }
+    });
+  }
 }
 async function probeLanIpChange() {
   if (document.hidden || lanIpProbeRunning || networkRecoveryRunning) return;
@@ -5187,6 +5217,16 @@ function isSessionAlive(s) {
   return Date.now() - (s.lastPong || 0) < SESSION_PONG_STALE_MS;
 }
 
+// 唤醒宽限：手机回前台（亮屏/切回标签页）瞬间，定时器刚被系统解冻，
+// 心跳与数据都要缓一缓才能恢复。立刻按 40 秒心跳判死会把「只是去后台
+// 待了一会」的会话误杀——表现为「谁都没换网却提示网络切换、反复断连」。
+// 宽限期内照常发 ping 探测，但不做判死收尾。
+const WAKE_GRACE_MS = 15000;
+function giveWakeGrace() {
+  const until = Date.now() + WAKE_GRACE_MS;
+  sessions.forEach(s => { if (!s.closed) s.wakeGraceUntil = until; });
+}
+
 function sessionHealthTick() {
   const now = Date.now();
   sessions.forEach(s => {
@@ -5201,10 +5241,16 @@ function sessionHealthTick() {
     }
     // 通道"开着"但心跳失联 → 半死僵尸（对端网络切换/页面关闭收不到 close）→ 收尾
     if (now - (s.lastPong || 0) > SESSION_PONG_STALE_MS) {
+      if (now < (s.wakeGraceUntil || 0)) {
+        // 唤醒宽限内不判死：先探测一轮，给对端解冻恢复的时间
+        try { sendControl(s, { type: 'ping' }); } catch (e) { /* 下轮再判 */ }
+        return;
+      }
       console.warn('会话心跳失联，判定断开:', s.key);
       const name = sessionDisplayName(s);
       closeSession(s);
       showToast('与 ' + esc(name) + ' 的连接已断开', 'warning');
+      maybeAutoReconnect(s); // 对端多半只是去后台/换网：排队自动重拨
       return;
     }
     try { sendControl(s, { type: 'ping' }); } catch (e) { /* 通道半死抛错：下轮超时收尾 */ }
