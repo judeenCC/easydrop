@@ -11,3 +11,7 @@ compatibility_date = "2024-12-01"
 name = "BEACON_ROOM"
 class_name = "BeaconRoom"
 script_name = "easydrop-beacon"
+
+[[kv_namespaces]]
+binding = "TURN_QUOTA"
+id = "842a0944f88b42b682d151258f5ad54e"

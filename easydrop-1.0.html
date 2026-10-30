@@ -5,9 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EasyDrop - 跨网络文件传输</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath fill='white' d='M18.2 3.5 8.4 17.2h6.2L13 28.5l10.6-14.2h-6.3L18.2 3.5z'/%3E%3C/svg%3E">
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<!-- 自托管（vendor/）：tailwind 运行时编译脚本 3.4.17 不再依赖 cdn.tailwindcss.com -->
+<script src="vendor/tailwindcss-3.4.17.js"></script>
+<!-- 自托管（vendor/）：PeerJS 1.5.2 信令/协商库不再依赖 unpkg.com -->
+<script src="vendor/peerjs-1.5.2.min.js"></script>
+<!-- 自托管（vendor/）：MQTT-over-WebSocket 库（信标客户端）不再依赖 unpkg.com -->
+<script src="vendor/mqtt-5.10.1.min.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -29,7 +32,26 @@ tailwind.config = {
   }
 }
 </script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style id="local-fonts">
+  /* 自托管字体（vendor/fonts/，latin 子集 + font-display:swap）：
+     中文经由 fallback 系统字体渲染，非拉丁字符-perf 与原 CSS2 分段加载一致 */
+  @font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900; /* 可变字体：一份文件覆盖 400/500/600/700 */
+    font-display: swap;
+    src: url('vendor/fonts/inter-var-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('vendor/fonts/jetbrainsmono-400.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+</style>
 <!-- Font Awesome Free 6.4.0 — https://fontawesome.com License: https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT). 内嵌子集，避免 CDN / 广告拦截导致图标空白。 -->
 <style id="fa-icons">
 @font-face {
@@ -402,8 +424,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.29-r20 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.29-r20</button>
+                title="当前版本 v26.10.30-r21 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.30-r21</button>
             </div>
           </div>
         </div>
@@ -1099,13 +1121,55 @@ function getIceServers() {
   servers.push({ urls: 'stun:stun.cloudflare.com:3478' });
   servers.push({ urls: 'stun:stun.qq.com:3478' });      // 腾讯公网 STUN，国内稳定
   servers.push({ urls: 'stun:stun.miwifi.com:3478' });   // 小米公网 STUN，国内稳定
-  // TURN 中继兜底：跨网/严格 NAT/运营商 CGNAT 场景，直连失败时仍可建立连接。
-  // TCP 传输比 UDP 穿透力强得多（实测跨运营商场景常只有 TCP TURN 能通）
-  servers.push({ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
-  servers.push({ urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
-  servers.push({ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
-  servers.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
+  // TURN 中继（选型 A：Cloudflare Realtime TURN）：凭证由后端 /turn-creds
+  // 转发官方 REST 铸造（POST rtc.live.cloudflare.com，HTTP Bearer token 存
+  // Worker 环境变量，TTL 7200s；端点过滤 :53 端口与限流）。TURN_SERVERS 为
+  // 官方 iceServers 数组透传；未就绪/为空/拉取失败时保持为 null → 条件合
+  // 并跳过，纯 STUN 降级不阻塞。只并入 turn/turns 组（官方数组里的 stun
+  // 组与本地 STUN 重复，会拉长 ICE gathering）
+  if (Array.isArray(TURN_SERVERS)) {
+    TURN_SERVERS.forEach(g => {
+      const u = Array.isArray(g.urls) ? g.urls.join(' ') : (g.urls || '');
+      if (!/turns?:/.test(u)) return;
+      const e = { urls: g.urls };
+      if (g.username !== undefined) e.username = g.username;
+      if (g.credential !== undefined) e.credential = g.credential;
+      servers.push(e);
+    });
+  }
   return servers;
+}
+
+// ==================== TURN 凭证后台装载 ====================
+let TURN_SERVERS = null;       // 官方 iceServers 数组透传：[{urls[, username, credential]}, ...]
+let turnRefreshTimer = null;
+async function fetchTurnCreds() {
+  try {
+    const res = await fetch('/turn-creds');
+    if (!res.ok) {
+      // 静默降级：503=未配置/超限 / 429=限流 / 502=上游失败 → 只用 STUN，绝不阻塞业务
+      console.warn('TURN 凭证拉取失败（降级纯 STUN）: HTTP', res.status);
+      return;
+    }
+    const data = await res.json();
+    if (!data || !Array.isArray(data.iceServers)) {
+      console.warn('TURN 凭证格式异常，忽略（降级纯 STUN）');
+      return;
+    }
+    TURN_SERVERS = data.iceServers.filter(g => g && (typeof g.urls === 'string' || Array.isArray(g.urls)));
+    if (!TURN_SERVERS.length) {
+      TURN_SERVERS = null;
+      console.warn('TURN iceServers 过滤后为空，降级纯 STUN');
+      return;
+    }
+    console.log('TURN 中继凭证就绪（过期 ' + new Date(data.expiresAt).toLocaleTimeString() + '，新连接生效）');
+    // 过期前 10 分钟主动重拉（仅影响将来的新会话；已建连接的 TURN 分配独立存活）
+    if (turnRefreshTimer) clearTimeout(turnRefreshTimer);
+    const refreshIn = Math.max(60000, (data.expiresAt || Date.now() + 7200000) - Date.now() - 10 * 60 * 1000);
+    turnRefreshTimer = setTimeout(() => { fetchTurnCreds(); }, refreshIn);
+  } catch (e) {
+    console.warn('TURN 凭证拉取异常（降级纯 STUN）:', e);
+  }
 }
 
 // ==================== ICE 诊断（设置面板「运行连接诊断」） ====================
@@ -2394,7 +2458,7 @@ async function recoverNetworkStack(reason) {
   // 静默优先：「检测到网络切换」toast 只在真正要全量重建时再弹，
   // 避免只是回后台/亮屏被误报为换网。
   try {
-    rememberSignaling(0); // 不允许一次抖动把设备留在被墙的备用云端
+    // 只用自建信令（v21.x 起不再有云端回退位），无需复位轮换状态
     lanIpCache = null;
     resetLanBus();
     initPresenceBeacon();
@@ -2870,12 +2934,11 @@ function updateTimerDisplay() {
 
 // ==================== PeerJS Management ====================
 // ==================== PeerJS 信令服务选择 ====================
-// 自建信令走 Cloudflare DO 总线（与 presence 发现总线同一域名）：第三方
-// 0.peerjs.com 免费云端的拨号转发（offer 中继路径）在国内网络下经常被阻断，
-// 表现为「双方都在线、拨号却 20 秒超时」（连不存在的 ID 都不报 peer-unavailable
-// 而是静默挂死）。自建通道与页面同源，可达性与 presence 完全一致；
-// 自建失联时自动回退云端，并把成功偏好存 localStorage 下次优先。
-const SIGNALING_KEY = 'easydrop_signaling_idx';
+// 信令只用自建 DO 总线（与 presence 发现总线同一域名）：不再回落
+// 0.peerjs.com 免费云端——它的 offer 转发在国内常被阻断，且失败回落
+// 会让两台设备各属一套总线（互拨超时死循环）。所有会话永远使用同
+// 一台信令服务器；自建通道异常时在 createPeer 内做指数退避重试
+// （1s/2s/4s + 抖动，最多 3 轮），重试逻辑仅集中在 createPeer 一处。
 const SIGNALING_HOSTS = [
   {
     // 生产 pages.dev 用同源；本地调试（http/127.0.0.1）落到固定线上地址
@@ -2884,58 +2947,212 @@ const SIGNALING_HOSTS = [
     path: '/easydrop-peerjs/',
     key: 'peerjs',
     secure: true
-  },
-  null // null = PeerJS 免费云端默认（0.peerjs.com）
+  }
 ];
-let signalingIdx = 0; // 每次加载一律先尝试自建信令：云端回退只在本次运行有效
-try { localStorage.removeItem(SIGNALING_KEY); } catch (e) { /* noop */ } // 清历史偏好：曾让一次抖动把设备永久锁在旧云端（两端分属不同总线，互拨全部 peer-unavailable）
+// 指数退避重试参数：3 轮封顶（额外叠加 0~500ms 随机抖动防同时唤醒）
+const SIGNALING_RETRY_DELAYS = [1000, 2000, 4000];
+// 防重入世序：每次工厂实例化自增；所有异步回调（守卫/重试/降级）醒来时
+// 先核对 epoch 是否仍是自己的——外部已重建则本轮全部作废
 let signalingGuardSeq = 0;
+// unavailable-id 一次性降级占用标志：每个页面会话内 device/code 各最多降级一次，
+// 跨 createPeer 实例存活（提升到模块级，不随单个工厂终结而重置）
+let deviceDegradedOnce = false;
+let codeDegradedOnce = false;
 
-function rememberSignaling(idx) {
-  signalingIdx = idx; // 仅内存，不再写 localStorage：下次加载自动回到自建主信令
-}
+function createPeer(peerId, kind, onOpenExtra) {
+  const opt = SIGNALING_HOSTS[0];
+  // 退自举防重入世序：本工厂调用自增模块级序号；一切异步回调（守卫/
+  // 重试/降级）醒来时先核对 epoch——外部已重建则本轮全部作废
+  const epoch = ++signalingGuardSeq;
+  // 退化自举：devicePeer / codePeer 是模块级全局——重试循环内重建的
+  // 新实例必须写回对应全局引用，调用点才能继续感知最新实例
+  const globalRef = () => (kind === 'device') ? devicePeer : codePeer;
+  let attempt = 0;      // 已发起的重试轮数（0~3）
+  let retryTimer = null;
+  let openGuard = null;
+  let dead = false;     // 3 轮重试耗尽 → 本实例生命周期终结，不再复活
 
-function createPeer(peerId, kind) {
-  const opt = SIGNALING_HOSTS[signalingIdx];
-  const p = new Peer(peerId || undefined, Object.assign({
-    config: { iceServers: getIceServers() }
-  }, opt || {}));
-  p.__kind = kind; // 标记用途，供重置逻辑判断是否复用
-
-  // 注册超时守卫：信令通道不可达（10 秒未 open）→ 轮换到下一个信令服务重建。
-  // 正常自建信令 1 秒内 open；此守卫只兜底网络/部署异常，不干扰正常流程
-  const openGuard = setTimeout(() => {
-    if (p.destroyed || p.open) return;
-    if (signalingIdx < SIGNALING_HOSTS.length - 1) {
-      console.warn('信令服务未就绪（10s 未注册），切换备用信令通道重试');
-      rememberSignaling(signalingIdx + 1);
-      try { p.destroy(); } catch (e) { /* noop */ }
-      if (kind === 'device' && (!devicePeer || devicePeer === p)) {
-        devicePeer = createPeer(devicePeerId(), 'device');
-      } else if (kind === 'code' && sessionCode && (!codePeer || codePeer === p)) {
-        codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
-      }
-    }
-  }, 10000);
-
-  p.on('open', (id) => {
-    clearTimeout(openGuard);
-    console.log('PeerJS 已就绪 (' + kind + '):', id, opt ? ('信令=' + opt.host) : '信令=0.peerjs.com');
-    // 设备 ID 注册成功即复位失败计数，否则累计 3 次后会永久降级为临时 ID
-    if (kind === 'device') stableIdRetry = 0;
+  const clearTimers = () => {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (openGuard) { clearTimeout(openGuard); openGuard = null; }
+  };
+  // 彻底清理：关 socket/DataChannel 连接 → 摘除全部事件监听 → 引用置空
+  const killInstance = (p) => {
+    if (!p) return;
+    try { p.removeAllListeners(); } catch (e) { /* noop */ }
+    try { p.destroy(); } catch (e) { /* noop */ }
+  };
+  const adopt = (p) => {
+    if (kind === 'device') devicePeer = p; else codePeer = p;
     updateConnectionStatus();
-  });
+  };
+  const spawn = (id) => {
+    const p = new Peer(id || undefined, Object.assign({
+      config: { iceServers: getIceServers() }
+    }, opt));
+    p.__kind = kind; // 标记用途，供重置逻辑判断是否复用
+    return p;
+  };
 
-  p.on('connection', (conn) => handleIncomingConnection(conn, kind));
+  // 重建路径共用：spawn → 占位 → 接线 → 守卫（重试与一次性降级都走这条，
+  // 规防漏防重入；世序已变则直接弃赛返回 null，由调用方走终态）
+  const spawnAndArm = (id) => {
+    if (epoch !== signalingGuardSeq) return null; // 世序已变，外部已接管
+    const p = spawn(id);
+    adopt(p);
+    wire(p);
+    armOpenGuard(p);
+    return p;
+  };
 
-  // 信令服务器断线时自动重连（不影响已建立的 P2P 传输）
-  p.on('disconnected', () => {
-    if (p.destroyed) return; // 主动销毁时不触发重连
-    console.warn('信令服务器连接中断，正在重连...');
-    try { p.reconnect(); } catch (e) { /* noop */ }
-  });
+  // 3 轮重试全部失败：停止生命周期，不静默——显式报错由用户决定下一步
+  const giveUp = (reason) => {
+    if (dead) return;
+    dead = true;
+    clearTimers();
+    console.error('信令重试 3 轮全部失败，停止重试（' + kind + '）：', reason);
+    killInstance(globalRef());
+    adopt(null);
+    showToast(kind === 'device'
+      ? '无法连接信令服务器（自动重试已失败），请检查网络或稍后刷新页面重试'
+      : '连接码服务不可达（自动重试已失败），请稍后重试', 'error');
+  };
 
-  p.on('error', (err) => handlePeerError(err, kind, p));
+  // 指数退避重试（本工厂唯一出口；各调用点零复制）。
+  // 安全阀：device 存在活会话/拨号时绝不销毁重建——PeerJS destroy 会
+  // 连带 close 该 peer 上全部数据通道（主动换链路实验的教训）。
+  const scheduleRetry = (reason, pRef) => {
+    if (dead || !globalRef()) return; // 外部已重建/接管，本工厂退出
+    if (globalRef() !== pRef) return; // 引用被外部换血，不再越权重试
+    const busy = kind === 'device' &&
+      (dialActive || dialingFriend || dialingCode ||
+       Array.from(sessions.values()).some(isSessionAlive));
+    if (busy) {
+      console.warn('信令异常但存在活会话/拨号，不销毁重试（交给 socket 级 reconnect）：', reason);
+      clearTimeout(openGuard);
+      openGuard = setTimeout(() => { scheduleRetry(reason, pRef); }, 5000);
+      return;
+    }
+    if (attempt >= SIGNALING_RETRY_DELAYS.length) { giveUp(reason); return; }
+    const delay = SIGNALING_RETRY_DELAYS[attempt] + Math.floor(Math.random() * 500);
+    attempt++;
+    console.warn('信令退避重试 ' + attempt + '/3（' + kind + '，原因=' + reason + '），' + delay + 'ms 后');
+    clearTimeout(openGuard);
+    killInstance(pRef);
+    adopt(null);
+    retryTimer = setTimeout(() => {
+      if (dead || epoch !== signalingGuardSeq) return; // 终态或世序已变
+      if (globalRef() !== null) return; // 外部已重新赋值，弃赛
+      if (kind === 'code' && !sessionCode) return; // 码会话已关闭
+      // device 重试换新随机后缀：旧注册可能仍在服务器存活窗内占着原 ID，
+      // 换后缀可立刻注册成功（与 initializePeer(freshInstance) 同语义）
+      if (kind === 'device') {
+        peerIdSuffix = '-i' + Math.random().toString(36).slice(2, 6);
+        savePeerIdSuffix(peerIdSuffix);
+      }
+      const id = kind === 'device' ? devicePeerId() : (PEER_PREFIX_CODE + sessionCode);
+      spawnAndArm(id); // 统一接管路径（spawn→adopt→wire→armOpenGuard）
+    }, delay);
+  };
+
+  // 注册守卫：信令通道 10 秒未 open（网络/部署异常兜底）→ 退避重试
+  const armOpenGuard = (p) => {
+    clearTimeout(openGuard);
+    openGuard = setTimeout(() => {
+      if (p.destroyed || p.open || dead) return;
+      if (epoch !== signalingGuardSeq) return; // 世序已变
+      scheduleRetry('open-timeout', p);
+    }, 10000);
+  };
+
+  function wire(p) {
+    p.on('open', (id) => {
+      clearTimeout(openGuard);
+      clearTimeout(retryTimer);
+      attempt = 0; // 恢复成功：计数复位，为下一次失联重新计满
+      console.log('PeerJS 已就绪 (' + kind + '):', id, '信令=' + opt.host);
+      // 设备 ID 注册成功即复位失败计数，否则累计 3 次后会永久降级为临时 ID
+      if (kind === 'device') stableIdRetry = 0;
+      updateConnectionStatus();
+      // 实例后被重建时也须完成的打开处理（如连接码展示）：
+      // 以参数注入而不是事后 attach，保证重试/降级重建的新实例同样生效
+      if (onOpenExtra) { try { onOpenExtra(id); } catch (e) { console.warn('open 扩展处理失败:', e); } }
+    });
+
+    p.on('connection', (conn) => handleIncomingConnection(conn, kind));
+
+    // 信令断线：先原地重连（不影响已建立的 P2P 传输）；
+    // reconnect 明确失败（抛错）或 2.5s 仍未 open → 升级为退避重试
+    p.on('disconnected', () => {
+      if (p.destroyed || dead || epoch !== signalingGuardSeq) return;
+      console.warn('信令服务器连接中断，先原地重连...', kind);
+      try { p.reconnect(); } catch (e) { scheduleRetry('reconnect-fail', p); return; }
+      setTimeout(() => {
+        if (p.destroyed || p.open || dead || epoch !== signalingGuardSeq) return;
+        scheduleRetry('reconnect-stuck', p);
+      }, 2500);
+    });
+
+    p.on('error', (err) => {
+      console.error('PeerJS error:', err.type, err);
+      // 认证/占用类错误 → 分流：unavailable-id 可一次性降级；invalid-id 一律终态
+      if (err.type === 'unavailable-id' || err.type === 'invalid-id') {
+        const shownId = err.peerId || err.id || p.id || peerId;
+        // 终态：显式上报 + 停止生命周期（不重试、不复活）
+        const terminal = () => {
+          dead = true;
+          clearTimers();
+          killInstance(p);
+          adopt(null);
+          showToast(kind === 'device'
+            ? '设备信令注册失败（ID：' + shownId + '，被占用或非法），请关闭其他浏览器窗口或刷新本页重试'
+            : '连接码注册失败（ID：' + shownId + '，被占用或非法），请更换或稍后重试', 'error');
+        };
+        // 降级资格：仅 unavailable-id；当前实例未被外部接管、世序未变、
+        // 该 kind 在本页会话内尚未降级过（模块级标志，跨工厂存活）
+        const canDegrade = err.type === 'unavailable-id' &&
+          epoch === signalingGuardSeq && globalRef() === p && !dead &&
+          (kind === 'device' ? !deviceDegradedOnce : !codeDegradedOnce) &&
+          (kind !== 'code' || !!sessionCode);
+        if (!canDegrade) { terminal(); return; }
+        if (kind === 'device') {
+          deviceDegradedOnce = true;
+          peerIdSuffix = '-i' + Math.random().toString(36).slice(2, 6);
+          savePeerIdSuffix(peerIdSuffix);
+          const newId = devicePeerId();
+          console.warn('信令 ID 被占用，一次性降级换后缀：' + (p.id || shownId) + ' → ' + newId, kind);
+          killInstance(p);
+          attempt = 0; // 降级是全新一轮尝试
+          if (!spawnAndArm(newId)) { terminal(); return; } // 世序竞态兜底
+          showToast('检测到本页身份与另一窗口冲突，已自动隔离注册，本窗口收发不受影响', 'info');
+        } else {
+          codeDegradedOnce = true;
+          const oldShown = p.id || shownId;
+          sessionCode = generate6DigitCode(); // 连接码占用：换码（后缀救不了展示码）
+          console.warn('连接码信令 ID 被占用，一次性降级换新码：' + oldShown + ' → easydrop-code-' + sessionCode);
+          const cd = document.getElementById('codeDisplay');
+          if (cd) cd.textContent = sessionCode; // 强制刷新页面展示的连接码
+          killInstance(p);
+          attempt = 0;
+          if (!spawnAndArm(PEER_PREFIX_CODE + sessionCode)) { terminal(); return; }
+          showToast('连接码被他设备占用，已自动更换新码：' + sessionCode, 'info');
+        }
+        return;
+      }
+      // 传输层异常 → 指数退避重试（1s/2s/4s + 抖动，最多 3 轮）
+      if (err.type === 'network' || err.type === 'server-error' ||
+          err.type === 'socket-error' || err.type === 'socket-closed') {
+        scheduleRetry(err.type, p);
+        return;
+      }
+      handlePeerError(err, kind, p);
+    });
+  }
+
+  const p = spawn(peerId);
+  adopt(p); // 先占用全局引用，调用点的赋值只是同一实例的重复写
+  wire(p);
+  armOpenGuard(p);
   return p;
 }
 
@@ -3059,22 +3276,9 @@ function initializePeer(freshInstance) {
 }
 
 function handlePeerError(err, kind, p) {
-  console.error('PeerJS error:', err.type, err);
-  // 注册尚未完成时信令通道就断死（连不上/云端异常）→ 轮换备用信令重建。
-  // unavailable-id 不轮换：那是同 ID 多实例的正常语义（客户端自动换后缀重试）
-  if (p && !p.open && !p.destroyed && signalingIdx < SIGNALING_HOSTS.length - 1 &&
-      (err.type === 'network' || err.type === 'server-error' ||
-       err.type === 'socket-error' || err.type === 'socket-closed')) {
-    console.warn('信令通道在注册前断死，切换备用信令:', err.type);
-    rememberSignaling(signalingIdx + 1);
-    try { p.destroy(); } catch (e) { /* noop */ }
-    if (kind === 'device' && (!devicePeer || devicePeer === p)) {
-      devicePeer = createPeer(devicePeerId(), 'device');
-    } else if (kind === 'code' && sessionCode && (!codePeer || codePeer === p)) {
-      codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
-    }
-    return;
-  }
+  // 认证类（unavailable-id/invalid-id）与传输类（network/server-error/
+  // socket-error/socket-closed）错误已由 createPeer 内的统一错误网关
+  // 处理（退避重试/显式上报），这里只分流剩余的业务性错误。
   switch (err.type) {
     case 'peer-unavailable':
       if (dialingFriend) {
@@ -3089,56 +3293,6 @@ function handlePeerError(err, kind, p) {
       } else {
         showToast('对方不在线', 'error');
       }
-      break;
-    case 'unavailable-id':
-      if (kind === 'code') {
-        // 极小概率的连接码冲突，自动换码重试
-        if (codeRetry < 3) {
-          codeRetry++;
-          showToast('连接码冲突，已自动更换新码', 'info');
-          sessionCode = generate6DigitCode();
-          document.getElementById('codeDisplay').textContent = sessionCode;
-          createCodePeer();
-        } else {
-          showToast('连接码注册失败，请稍后重试', 'error');
-          closeCodeSession();
-          switchTab('send');
-        }
-      } else if (kind === 'device' && devicePeer === p) {
-        // 识别码被占用：同源多标签页共用一个身份，第一个标签页持有信令 ID，
-        // 后续实例（或 其他设备撞码）给本实例分配会话级后缀重试。
-        // 绝不覆盖持久化识别码 —— 那会让好友记录与对方存储的地址全部失效
-        stableIdRetry = (stableIdRetry || 0) + 1;
-        if (stableIdRetry > 6) {
-          // 不再死等用户手动刷新：重置计数、10 秒后自动换随机后缀重试
-          showToast('连接服务注册受阻，10 秒后自动重试', 'warning');
-          setTimeout(() => {
-            if (devicePeer && devicePeer.open) return; // 期间已恢复
-            stableIdRetry = 3;
-            peerIdSuffix = '-i' + Math.random().toString(36).slice(2, 6);
-            savePeerIdSuffix(peerIdSuffix);
-            console.warn('信令注册重试（新后缀）:', devicePeerId());
-            devicePeer = createPeer(devicePeerId(), 'device');
-          }, 10000);
-          break;
-        }
-        let sfx = stableIdRetry === 1 ? tryReadPeerIdSuffix() : '';
-        if (!sfx) {
-          sfx = '-i' + Math.random().toString(36).slice(2, 6);
-          savePeerIdSuffix(sfx);
-        }
-        peerIdSuffix = sfx;
-        console.warn('识别码 ' + myDeviceId + ' 的信令 ID 被占用，改用实例后缀重试 (' + stableIdRetry + '):', devicePeerId());
-        try { p.destroy(); } catch (e) { /* noop */ }
-        devicePeer = createPeer(devicePeerId(), 'device');
-        if (stableIdRetry === 1) showToast('检测到本设备已在其他窗口打开，本窗口已可独立收发连接', 'info');
-      }
-      break;
-    case 'network':
-      showToast('与信令服务器的网络连接中断，正在自动重连', 'warning');
-      break;
-    case 'server-error':
-      showToast('信令服务器暂时不可用，请稍后重试', 'error');
       break;
     case 'browser-incompatible':
       showToast('浏览器不兼容 WebRTC，请使用 Chrome、Firefox 或 Edge', 'error');
@@ -3176,9 +3330,9 @@ function createCodePeer() {
     try { codePeer.destroy(); } catch (e) { /* noop */ }
     codePeer = null;
   }
-  codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code');
-
-  codePeer.on('open', () => {
+  // 展示处理以 onOpenExtra 注入：退避/降级重建出的新 codePeer 同样会在
+  // open 时刷新页面码与共享界面（事后 attach 只对首个实例生效）
+  codePeer = createPeer(PEER_PREFIX_CODE + sessionCode, 'code', () => {
     const cd = document.getElementById('codeDisplay');
     if (cd) cd.textContent = sessionCode;
     hide('connectingState');
@@ -3303,12 +3457,7 @@ function failCodeDial(msg) {
   clearDialTimeout();
   hideDialBanner();
   showToast(msg, 'error');
-  // 若曾被轮换到旧云端（其拨号转发已被墙），失败即切回自建主信令
-  if (signalingIdx !== 0) {
-    rememberSignaling(0);
-    initializePeer();
-    showToast('已切回主信令通道，请再次发起连接', 'info');
-  }
+  // 信令已固定为自建 DO 通道（不再轮换云端），此处无需切回动作
 }
 
 function failFriendDial(msg) {
@@ -3319,12 +3468,7 @@ function failFriendDial(msg) {
   clearDialTimeout();
   hideDialBanner();
   showToast(msg, 'error');
-  // 同上：一次网络抖动不再把设备永久留在旧云端
-  if (signalingIdx !== 0) {
-    rememberSignaling(0);
-    initializePeer();
-    showToast('已切回主信令通道，请再次发起连接', 'info');
-  }
+  // 同上：信令已固定为自建 DO 通道，无需切回动作
 }
 
 // 清理拨号状态（不关闭连接）；LocalSend 行内转圈随之复位
@@ -5603,6 +5747,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   initializePeer();
+  fetchTurnCreds(); // TURN 凭证后台预拉（选型 A）：失败静默降级纯 STUN，绝不阻塞
   renderDeviceAddress();
   updateLanIpDisplay().then(() => initLanDiscovery());
   initPresenceBeacon(); // 全局在线信标：跨网络好友的纸飞机亮蓝
