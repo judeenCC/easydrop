@@ -3,3 +3,9 @@
 
 # Pages 部署暂存目录（内容来自仓库内文件拼装）
 .deploy-cloudflare/
+
+# local design scratch and debug leftovers
+*.fig
+*.figcraft
+Frame 5.svg
+extracted.js
