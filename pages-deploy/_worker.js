@@ -31,10 +31,27 @@ const TURN_API_BASE = 'https://rtc.live.cloudflare.com/v1/turn/keys/';
 const turnRateBuckets = new Map();
 // isolate 内存凭证缓存：{ iceServers, issuanceAt, ttl }
 let turnCredsCache = null;
+// C2：KV 共享缓存读侧余命守卫（毫秒）。即使 KV 尚未到点自动删除，余命
+// 剩 <600s 也视为失效——客户端拿这种凭证去新建长传输，TURN 分配可能在
+// 传输中途失效（表现为传到一半断流）
+const TURN_KV_RESIDUAL_GUARD_MS = 600 * 1000;
 
 function turnClientIp(request) {
   return request.headers.get('CF-Connecting-IP') ||
          request.headers.get('X-Forwarded-For') || 'unknown';
+}
+
+// C1：调试点常量时间比对。?debug=1 必须配 k=<TURN_DEBUG_TOKEN>（Pages
+// custom secret，生成建议 openssl rand -hex 16）比对通过才视为开启；
+// 无 secret/无 token/比对失败 → 一律按未开（不出调试头、不回上游详情）。
+// 穷举防线由既有 per-IP 限流（5/min + 200/day）兜底
+function turnDebugTokenMatch(expect, got) {
+  expect = String(expect || '');
+  got = String(got || '');
+  if (!expect || expect.length !== got.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expect.length; i++) diff |= expect.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
 }
 
 function turnRateAllow(ip, now) {
@@ -96,9 +113,27 @@ async function turnSharedGet(env) {
     const raw = await env.TURN_QUOTA.get(TURN_KV_CREDS_KEY);
     if (!raw) return null;
     const o = JSON.parse(raw);
-    if (!o || !Array.isArray(o.iceServers) || !o.issuanceAt || !o.ttl) return null;
-    if (o.issuanceAt + o.ttl * 1000 - TURN_CACHE_SAFETY_MS <= Date.now()) return null; // 过期前 10 分钟起视为失效
-    return o;
+    if (!o) return null;
+    // C2 新结构：{ creds: [{username, credential, urls}], mintedAt, ttl } ——
+    // 读侧用 mintedAt + ttl 算余命；余命 < 600s 弃用（宁可本 isolate 重铸，
+    // 不把临近到期的凭证发给客户端去新建长传输）
+    if (Array.isArray(o.creds) && o.creds.length && o.mintedAt && o.ttl) {
+      if (o.mintedAt + o.ttl * 1000 - TURN_KV_RESIDUAL_GUARD_MS <= Date.now()) return null;
+      return { iceServers: o.creds, issuanceAt: o.mintedAt, ttl: o.ttl };
+    }
+    // r21 旧结构兼容：{ iceServers, issuanceAt, ttl } —— 余命照常复算
+    //（过期前 10 分钟视为失效），并按新规只回 turn/turns 组（stun 组不缓存）
+    if (Array.isArray(o.iceServers) && o.issuanceAt && o.ttl) {
+      if (o.issuanceAt + o.ttl * 1000 - TURN_CACHE_SAFETY_MS <= Date.now()) return null;
+      const turns = (o.iceServers || []).filter(g => {
+        if (!g) return false;
+        const u = Array.isArray(g.urls) ? g.urls.join(' ') : (g.urls || '');
+        return /turns?:/.test(u);
+      });
+      if (!turns.length) return null;
+      return { iceServers: turns, issuanceAt: o.issuanceAt, ttl: o.ttl };
+    }
+    return null;
   } catch (e) { return null; }
 }
 
@@ -128,12 +163,25 @@ async function turnMintViaApi(env, debug) {
       throw new turnUpstreamError(res.status, 'empty-iceServers');
     }
     turnCredsCache = { iceServers, issuanceAt: Date.now(), ttl: TURN_TTL_SECONDS };
-    // 双写 L2：KV 共享缓存，TTL = 凭证硬时长（到点自动删除）
+    // 双写 L2：KV 共享缓存。C2 三收紧：
+    // 1) stun 组不缓存——官方返回常附带 stun 组，本地已内置多组并探，缓存
+    //    只留 turn/turns 组（信封最小化）
+    // 2) 值结构改为 { creds: [{username, credential, urls}], mintedAt, ttl }：
+    //    读侧可由 mintedAt+ttl 直接算余命
+    // 3) expirationTtl = floor(ttl * 0.9) = 6480s：KV 自动删除先于官方硬过期
+    //    10%，叠加读侧 600s 余命守卫双保险
     if (env.TURN_QUOTA) {
       try {
-        await env.TURN_QUOTA.put(TURN_KV_CREDS_KEY,
-          JSON.stringify({ iceServers, issuanceAt: turnCredsCache.issuanceAt, ttl: TURN_TTL_SECONDS }),
-          { expirationTtl: TURN_TTL_SECONDS });
+        const turnOnly = iceServers.filter(g => {
+          if (!g) return false;
+          const u = Array.isArray(g.urls) ? g.urls.join(' ') : (g.urls || '');
+          return /turns?:/.test(u);
+        });
+        if (turnOnly.length) {
+          await env.TURN_QUOTA.put(TURN_KV_CREDS_KEY,
+            JSON.stringify({ creds: turnOnly, mintedAt: turnCredsCache.issuanceAt, ttl: TURN_TTL_SECONDS }),
+            { expirationTtl: Math.floor(TURN_TTL_SECONDS * 0.9) });
+        }
       } catch (e) { /* KV 写失败不阻断（L1 仍有效）*/ }
     }
     return turnCredsCache;
@@ -167,8 +215,14 @@ async function turnQuotaGate(env, mint) {
 }
 
 async function handleTurnCreds(request, env) {
-  // ?debug=1：仅在调试点开启时回传上游错误详情（响应头 + 截断响应体），平时不开
-  const debug = new URL(request.url).searchParams.get('debug') === '1';
+  // C1 门槛：?debug=1 仅当 k=<TURN_DEBUG_TOKEN> 通过常量时间比对时才视为
+  // 开启；未通过一律按未开（不出调试头、不回上游状态码/响应体）
+  const url = new URL(request.url);
+  let debug = url.searchParams.get('debug') === '1';
+  if (debug) {
+    debug = turnDebugTokenMatch(env.TURN_DEBUG_TOKEN, url.searchParams.get('k'));
+    if (!debug) console.warn('turn debug 访问被拒（缺 TURN_DEBUG_TOKEN secret 或 token 不符）');
+  }
   // 1) 每 IP 基础限流
   const ip = turnClientIp(request);
   if (!turnRateAllow(ip, Date.now())) {

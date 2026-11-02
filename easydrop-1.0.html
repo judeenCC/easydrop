@@ -424,8 +424,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.10.30-r21 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.10.30-r21</button>
+                title="当前版本 v26.11.01-r22 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.01-r22</button>
             </div>
           </div>
         </div>
@@ -872,8 +872,8 @@ tailwind.config = {
       </div>
       <div>
         <label class="text-sm text-slate-500 mb-2 block">STUN 服务器（用于跨网络连接）</label>
-        <input type="text" id="stunServer" value="stun:stun.l.google.com:19302" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 code-display text-slate-700">
-        <p class="text-xs text-slate-400 mt-1">用于 NAT 穿透，支持不同网络环境下的连接</p>
+        <input type="text" id="stunServer" value="" placeholder="留空 = 内置多组并探（Cloudflare/腾讯/小米）" class="w-full bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 code-display text-slate-700">
+        <p class="text-xs text-slate-400 mt-1">用于 NAT 穿透；留空使用内置 STUN 组，不支持自定义 TURN。旧版默认的 Google STUN 国内不可达，已在启动时自动清除</p>
       </div>
       <div>
         <button type="button" id="iceDiagBtn" onclick="runIceDiagnostics()" class="w-full py-2.5 rounded-xl glass hover:bg-slate-100 text-sm text-primary-600 font-medium">运行连接诊断（检测 WebRTC 打洞能力）</button>
@@ -1112,6 +1112,20 @@ function ensureIdentity() {
 // STUN 拿公网映射候选，直连打不通时 TURN 中继是唯一通路。国内网络下
 // Google STUN 被墙（纯浪费 ICE 时间），补腾讯/小米公网 STUN；运营商 CGNAT
 // 对 UDP 限制严，TURN 加 TCP 传输（443 通道最接近普通 HTTPS 流量、最易放行）
+// A 项：旧版 Google STUN 残留配置的 boot 自愈迁移。旧版把
+// stun:stun.l.google.com:19302 写死为设置面板默认值，用户一旦点过「保存设置」
+// 就会把它写进 localStorage（easydrop_stun），国内网络下它是纯不可达的死
+// 配置——每个新拨号都白费一轮 ICE gathering 超时。r22 起：boot 时按指纹
+// 自动擦除，回落内置 Cloudflare/腾讯/小米多组并探；非 google 的自定义值不动。
+function migrateLegacyStun() {
+  let v = null;
+  try { v = localStorage.getItem('easydrop_stun'); } catch (e) { return; }
+  if (v && /stun\.l\.google\.com/i.test(v)) {
+    try { localStorage.removeItem('easydrop_stun'); } catch (e) { /* noop */ }
+    console.warn('检测到旧版 Google STUN 残留配置，已自动清除（回落内置 Cloudflare/腾讯/小米组）');
+  }
+}
+
 function getIceServers() {
   const servers = [];
   try {
@@ -1234,9 +1248,25 @@ async function runIceDiagnostics() {
     }
     if (full.srflx > 0) v.push('✅ STUN 可用（公网映射候选 ' + full.srflx + ' 个）');
     else v.push('⚠️ STUN 未产出公网映射候选：跨网直连可能失败（同网一般不受影响）');
-    if (full.relay > 0) v.push('✅ TURN 中继可用（' + full.relay + ' 个中继候选）');
-    else v.push('⚠️ TURN 中继不可用（当前免费中继线路不可达）：跨网且 NAT 严格时会连不上');
-    if (full.errors && full.errors.length) v.push('细节：' + full.errors.join('、') + '（701=STUN/TURN 不可达）');
+    if (full.relay > 0) {
+      v.push('✅ TURN 中继可用（' + full.relay + ' 个中继候选）');
+    } else if (full.gathering && full.gathering !== 'complete') {
+      // B 项判词修正：relay=0 但 gathering 尚未完成（被超时截断）→ 只能判
+      //「探测挂起/进行中」，不能下「不可用」结论——STUN/TURN 慢应答常见于
+      // 首次探测，截断前的 relay 零产不代表线路不可达
+      v.push('⚠️ TURN 中继探测挂起（采集未完成即被截断，结论未定）：跨网场景建议稍后重跑诊断再看');
+    } else {
+      v.push('⚠️ TURN 中继不可用（当前中继线路不可达）：跨网且 NAT 严格时会连不上');
+    }
+    if (full.errors && full.errors.length) {
+      const errList = full.errors;
+      const has701 = errList.some(e => /^701/.test(String(e)));
+      // B 项判词修正：701 = 单次探测仍在进行/悬挂的瞬时信号（Chrome 语义），
+      // 不是最终失败判据——需与采集状态配合判读，单独出现不构成「不可达」
+      v.push('细节：' + errList.join('、') + (has701
+        ? '（701=单次探测仍在进行/悬挂，非最终失败判据；请配合上一行采集状态判读）'
+        : '（错误码=STUN/TURN 探测失败）'));
+    }
     v.push('（采集状态：' + full.gathering + '，用时 ' + (full.ms / 1000).toFixed(1) + ' 秒）');
     if (box) box.innerHTML = '<pre class="text-xs whitespace-pre-wrap text-slate-600 leading-relaxed font-sans">' + esc(v.join('\n')) + '</pre>';
     console.log('[ICE诊断]', { hostOnly, full });
@@ -1792,8 +1822,14 @@ async function connectToFriend(friendId, from = null) {
     return;
   }
   if (!devicePeer) {
-    showToast('信令连接未就绪，请稍后重试', 'error');
-    return;
+    // W1：giveUp 终态/竞态后 devicePeer=null——旧版死 toast 直接 return，
+    // 拨号从此瘫痪（唯一恢复路径 = 切后台触发 networkRecovery）。现在
+    // 就地自愈：ensurePeerOpen 内部 initializePeer(true) 重建并等待 open。
+    showToast('正在恢复服务连接...', 'info');
+    if (!(await ensurePeerOpen())) {
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
+      return;
+    }
   }
 
   // 先进入可取消的拨号状态，再等待信令服务就绪（等待期间也能取消）
@@ -1814,7 +1850,7 @@ async function connectToFriend(friendId, from = null) {
     if (!ok) {
       endDial();
       hideDialBanner();
-      showToast('连接服务未就绪，请稍后重试', 'error');
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
   }
@@ -2742,8 +2778,14 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
     return;
   }
   if (!devicePeer) {
-    showToast('信令连接未就绪，请稍后重试', 'error');
-    return;
+    // W1：giveUp 终态/竞态后 devicePeer=null——旧版死 toast 直接 return，
+    // 拨号从此瘫痪（唯一恢复路径 = 切后台触发 networkRecovery）。现在
+    // 就地自愈：ensurePeerOpen 内部 initializePeer(true) 重建并等待 open。
+    showToast('正在恢复服务连接...', 'info');
+    if (!(await ensurePeerOpen())) {
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
+      return;
+    }
   }
   const seq = ++dialSeq;
   dialActive = true;
@@ -2761,7 +2803,7 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
     if (!ok) {
       endDial();
       hideDialBanner();
-      showToast('连接服务未就绪，请稍后重试', 'error');
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
   }
@@ -2949,8 +2991,11 @@ const SIGNALING_HOSTS = [
     secure: true
   }
 ];
-// 指数退避重试参数：3 轮封顶（额外叠加 0~500ms 随机抖动防同时唤醒）
-const SIGNALING_RETRY_DELAYS = [1000, 2000, 4000];
+// 指数退避重试参数：5 轮封顶（额外叠加 0~500ms 随机抖动防同时唤醒）。
+// W1：旧预算 [1000,2000,4000] 总窗口 ~7.5s，对联网络 TCP 10s 超时下
+// 一轮未完成即击穿全部预算 → 直接 giveUp 自伤；拉长到 ~59s 窗口
+// （2+4+8+15+25 秒）可跨过 10s 量级的间歇性阻塞
+const SIGNALING_RETRY_DELAYS = [2000, 4000, 8000, 15000, 25000];
 // 防重入世序：每次工厂实例化自增；所有异步回调（守卫/重试/降级）醒来时
 // 先核对 epoch 是否仍是自己的——外部已重建则本轮全部作废
 let signalingGuardSeq = 0;
@@ -2967,10 +3012,10 @@ function createPeer(peerId, kind, onOpenExtra) {
   // 退化自举：devicePeer / codePeer 是模块级全局——重试循环内重建的
   // 新实例必须写回对应全局引用，调用点才能继续感知最新实例
   const globalRef = () => (kind === 'device') ? devicePeer : codePeer;
-  let attempt = 0;      // 已发起的重试轮数（0~3）
+  let attempt = 0;      // 已发起的重试轮数（0~SIGNALING_RETRY_DELAYS.length）
   let retryTimer = null;
   let openGuard = null;
-  let dead = false;     // 3 轮重试耗尽 → 本实例生命周期终结，不再复活
+  let dead = false;     // 重试预算耗尽 → 本实例生命周期终结，不再复活
 
   const clearTimers = () => {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -3005,16 +3050,28 @@ function createPeer(peerId, kind, onOpenExtra) {
     return p;
   };
 
-  // 3 轮重试全部失败：停止生命周期，不静默——显式报错由用户决定下一步
+  // 信令重试预算耗尽 → 终态：断开信令 socket，但绝不连坐销毁数据通道。
+  // W1 教训改法：旧版调 killInstance(p.destroy())——PeerJS destroy 会连带
+  // close 该 peer 上全部已建立的数据连接，NAT rebind 等间歇抖动触发重试
+  // 预算耗尽时，正在传输的会话被无辜断流（「传输中突然全部断死」的自伤
+  // 根源）。改为 disconnect()：PeerJS 语义 = 只关服务器 socket，已建立的
+  // DataConnection 全部保留（SCTP 通道独立于信令 WS 存活，传输不中断）；
+  // 先摘监听防终态后 socket 抖动误触发 reconnect 侧写（conn 上的事件
+  // 监听不受影响，会话级生命周期照常运转）；引用置空后拨号侧由
+  // ensurePeerOpen 的重建通路（W1 刀法②）就地自愈。
   const giveUp = (reason) => {
     if (dead) return;
     dead = true;
     clearTimers();
-    console.error('信令重试 3 轮全部失败，停止重试（' + kind + '）：', reason);
-    killInstance(globalRef());
+    console.error('信令重试预算耗尽，信令转入终态（' + kind + '）：', reason);
+    const p = globalRef();
+    if (p) {
+      try { p.removeAllListeners(); } catch (e) { /* noop */ }
+      try { p.disconnect(); } catch (e) { /* noop */ }
+    }
     adopt(null);
     showToast(kind === 'device'
-      ? '无法连接信令服务器（自动重试已失败），请检查网络或稍后刷新页面重试'
+      ? '无法连接信令服务器（自动重试已失败）。已建立的传输不受影响；重新发起连接即可自动重连服务'
       : '连接码服务不可达（自动重试已失败），请稍后重试', 'error');
   };
 
@@ -3036,7 +3093,7 @@ function createPeer(peerId, kind, onOpenExtra) {
     if (attempt >= SIGNALING_RETRY_DELAYS.length) { giveUp(reason); return; }
     const delay = SIGNALING_RETRY_DELAYS[attempt] + Math.floor(Math.random() * 500);
     attempt++;
-    console.warn('信令退避重试 ' + attempt + '/3（' + kind + '，原因=' + reason + '），' + delay + 'ms 后');
+    console.warn('信令退避重试 ' + attempt + '/' + SIGNALING_RETRY_DELAYS.length + '（' + kind + '，原因=' + reason + '），' + delay + 'ms 后');
     clearTimeout(openGuard);
     killInstance(pRef);
     adopt(null);
@@ -3044,6 +3101,16 @@ function createPeer(peerId, kind, onOpenExtra) {
       if (dead || epoch !== signalingGuardSeq) return; // 终态或世序已变
       if (globalRef() !== null) return; // 外部已重新赋值，弃赛
       if (kind === 'code' && !sessionCode) return; // 码会话已关闭
+      // D. busy 安全阀：delay 等待窗口内可能已进入拨号/建立会话（r9 红线：
+      // 活会话/拨号中绝不上台重建换血）。复查到 busy 则本轮作废、归还
+      // 预算——信令重生已交给拨号侧 ensurePeerOpen 的自愈重建（W1 刀法②）
+      // 或外部 networkRecovery；绝不抢在活会话传输中途换实例
+      if (kind === 'device' && (dialActive || dialingFriend || dialingCode ||
+          Array.from(sessions.values()).some(isSessionAlive))) {
+        console.warn('重试上台前检测到拨号/活会话，本轮作废（busy 守卫）:', reason);
+        attempt = Math.max(0, attempt - 1);
+        return;
+      }
       // device 重试换新随机后缀：旧注册可能仍在服务器存活窗内占着原 ID，
       // 换后缀可立刻注册成功（与 initializePeer(freshInstance) 同语义）
       if (kind === 'device') {
@@ -3361,6 +3428,15 @@ function closeCodeSession() {
 // ==================== Receiver: Enter Connection Code ====================
 // 等待信令 peer 就绪（断开后立刻重拨时 peer 可能尚未 open，
 // 此时 connect 的 offer 会被静默丢弃）
+// 等待 devicePeer 信令就绪（open 事件或超时）。
+// W1 改法：旧版 devicePeer===null 时立即 finish(false)——giveUp 终态后
+// devicePeer 永久为 null，一切拨号入口只能弹「信令未就绪」死 toast，
+// 等于拨号按钮永久瘫痪（唯一恢复路径 = 切后台/换网触发 networkRecovery
+// 的 initializePeer(true)，与「手动重连即愈」的实测画像吻合）。
+// 现在就地自愈：null 时主动 initializePeer(true) 重建并等待其 open 事件；
+// 超时仍由 timeoutMs 兜底，调用方按原语义收尾。null 时旧实例已不存在
+//（giveUp 已 disconnect+摘监听），initializePeer 的 destroy 分支不会碰
+// 任何存活实例 → 零数据通道连坐风险。
 function ensurePeerOpen(timeoutMs) {
   timeoutMs = timeoutMs || 10000;
   if (devicePeer && devicePeer.open) return Promise.resolve(true);
@@ -3370,14 +3446,26 @@ function ensurePeerOpen(timeoutMs) {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      clearInterval(poll);
       resolve(ok);
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
+    // 轮询兜底：重试工厂内部可能换血重建实例（换随机后缀防服务器存活窗
+    // 占位），open 事件监听只挂在当轮实例上；轮询保证「任何一轮新实例
+    // open」都能被捕获，且实例换血后旧监听自动随旧实例废弃
+    const poll = setInterval(() => {
+      if (devicePeer && devicePeer.open) finish(true);
+    }, 250);
+    const arm = (p) => {
+      p.on('open', () => finish(true));
+      p.on('error', () => finish(false));
+    };
     if (devicePeer) {
-      devicePeer.on('open', () => finish(true));
-      devicePeer.on('error', () => finish(false));
+      arm(devicePeer);
     } else {
-      finish(false);
+      try { initializePeer(true); } catch (e) { console.warn('ensurePeerOpen 重建信令实例失败:', e); }
+      if (devicePeer) arm(devicePeer);
+      else finish(false);
     }
   });
 }
@@ -3400,8 +3488,14 @@ async function generateAnswer() {
     return;
   }
   if (!devicePeer) {
-    showToast('正在连接服务，请稍后重试', 'error');
-    return;
+    // W1：giveUp 终态/竞态后 devicePeer=null——就地自愈（ensurePeerOpen
+    // 内部 initializePeer(true) 重建并等待 open），不再死 toast
+    showToast('正在恢复服务连接...', 'info');
+    if (!(await ensurePeerOpen())) {
+      endDial();
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
+      return;
+    }
   }
 
   // 先进入可取消的拨号状态，再等待信令服务就绪
@@ -3413,7 +3507,7 @@ async function generateAnswer() {
     if (seq !== dialSeq) return;
     if (!ok) {
       endDial();
-      showToast('连接服务未就绪，请稍后重试', 'error');
+      showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
   }
@@ -5137,12 +5231,116 @@ function sendTextMessage(s, content, kind) {
 }
 
 // ==================== Receive Data ====================
+// ==================== W3 流式落盘（PC 授权目录路径） ====================
+// 目标：关闭「数据蒸发」窗口（已收数据未组装成 Blob 时中断即丢失）。
+// - PC（downloadDirHandle 可用）：每收一帧按序 createWritable 追加写，
+//   close 时原子落盘为正式文件名；完整收齐时直接把盘上文件提升为
+//   item.blob（File 是 Blob 子类，下游接口兼容），零二次落盘；
+// - 中断（对端中止/会话清理/字节校验不符）：排干写队列后 close，已写
+//   部分内容保留为 `<原名>.partial`，再删除未满副本的正式名文件；
+// - 手机端 / 目录不可用 / 任一步失败（权限·建写柄·写帧）→ 静默回落
+//   原「全内存 + Blob」路径，行为与 r21 完全一致；
+// - 不改 cacheReceivedBlob / saveReceivedBlob 下游接口（函数签名不变）。
+let sinkInitPermToastShown = false;
+
+async function beginFileSink(item) {
+  item._sink = null;
+  item._sinkInitDone = false;
+  let createdName = '';
+  try {
+    if (!downloadDirHandle) { item._sinkInitDone = true; return; } // 手机端维持现状：全内存
+    if (!(await ensureDirPermission(downloadDirHandle))) {
+      downloadDirHandle = null;
+      updateDownloadDirUI();
+      if (!sinkInitPermToastShown) {
+        sinkInitPermToastShown = true;
+        showToast('下载目录授权已失效，本次传输回退默认保存方式', 'warning');
+      }
+      item._sinkInitDone = true;
+      return;
+    }
+    createdName = await uniqueDirFilename(downloadDirHandle, sanitizeFilename(item.name));
+    const handle = await downloadDirHandle.getFileHandle(createdName, { create: true });
+    const writable = await handle.createWritable();
+    item._sink = { name: createdName, handle, writable, writeChain: Promise.resolve() };
+    item._sinkInitDone = true;
+  } catch (e) {
+    item._sink = null;
+    item._sinkInitDone = true;
+    if (createdName && downloadDirHandle) {
+      try { await downloadDirHandle.removeEntry(createdName); } catch (e2) { /* 孤儿清理尽力而为 */ }
+    }
+    console.warn('流式落盘初始化失败（回落全内存路径）:', e);
+  }
+}
+
+// 按序写入一帧。失败即摘除 sink（后续帧仍由 receivedChunks 内存路径兜底）。
+function sinkWrite(item, payload) {
+  const sink = item._sink;
+  if (!sink) return;
+  sink.writeChain = sink.writeChain.then(() => sink.writable.write(payload)).catch(e => {
+    console.warn('流式落盘写帧失败（后续帧回落全内存路径）:', e);
+    item._sink = null;
+  });
+}
+
+// 提交：mode='complete' 结清并直接把盘上文件提升为 item.blob；
+//       mode='abort' 保留已写字节为 .partial 副本、删除未满正式名文件。
+// 返回 'file' / 'partial' / false（false=sink 不存在或提交失败，走调用方原路径）。
+async function settleFileSink(item, mode) {
+  const sink = item && item._sink;
+  if (!sink || !item._sinkInitDone) return false;
+  item._sink = null;
+  let closed = false;
+  try {
+    await sink.writeChain;
+    await sink.writable.close();
+    closed = true;
+  } catch (e) {
+    console.warn('流式落盘提交异常:', e);
+  }
+  if (!closed) return false;
+  try {
+    const f = await sink.handle.getFile();
+    if (mode === 'complete') {
+      if (f.size === item.size) {
+        item.blob = f;
+        item._streamSavedTo = downloadDirHandle ? downloadDirHandle.name : '';
+        return 'file';
+      }
+      return false; // 字节数不符 → 调用方原路径（完整性校验会给出明确报错）
+    }
+    // abort 模式：已写字节 → 复制为 .partial → 删除未满的正式名副本
+    if (f.size > 0) {
+      const partialName = await uniqueDirFilename(downloadDirHandle, sink.name + '.partial');
+      const ph = await downloadDirHandle.getFileHandle(partialName, { create: true });
+      const pw = await ph.createWritable();
+      await f.stream().pipeTo(pw);
+      try { await downloadDirHandle.removeEntry(sink.name); } catch (e) { /* 删除失败留待用户手动清理 */ }
+      item._partialSaved = { name: partialName, bytes: f.size };
+      return 'partial';
+    }
+  } catch (e) {
+    console.warn('流式落盘部分保存异常:', e);
+  }
+  return false;
+}
+
+function notifyPartialSaved(item) {
+  if (!item || !item._partialSaved) return;
+  const ps = item._partialSaved;
+  showToast(`文件 "${item.name}" 中断：已接收 ${formatFileSize(ps.bytes)}/${formatFileSize(item.size || 0)}，部分内容保留为 ${ps.name}`, 'warning');
+}
+
 function beginReceive(s, msg) {
   const rid = safeId(msg && msg.id);
   if (!rid || !msg.name) return;
   if (s.currentReceive) {
-    s.currentReceive.status = 'failed'; // 防御：乱序保护
-    stopRenderHeartbeat(s.currentReceive);
+    const prev = s.currentReceive;
+    prev.status = 'failed'; // 防御：乱序保护
+    stopRenderHeartbeat(prev);
+    // W3: 被顶替的未完成接收 → 中断提交（已写字节保留为 .partial）
+    settleFileSink(prev, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(prev); });
   }
 
   const item = {
@@ -5162,6 +5360,7 @@ function beginReceive(s, msg) {
   s.currentReceive = item;
   s.receivedChunks = [];
   s.receivedBytes = 0;
+  beginFileSink(item); // W3: 授权目录可用时预开流式落盘柄（异步；失败回落全内存路径）
   item._t0 = Date.now();
   startRenderHeartbeat(item, () => renderChat());
   // 后台会话收到新内容 → 未读 + tab 徽标 + 提示
@@ -5178,6 +5377,7 @@ function handleFileChunk(s, payload) {
   if (!s || !s.currentReceive) return;
   s.receivedChunks.push(payload);
   s.receivedBytes += payload.byteLength;
+  sinkWrite(s.currentReceive, payload); // W3: 边收边写（PC 授权目录路径；失败静默回落内存路径）
     if (s.currentReceive.status === 'receiving') {
       s.currentReceive.receivedBytes = s.receivedBytes;
       if (s.currentReceive.size > 0) {
@@ -5195,10 +5395,25 @@ function finishReceive(s, msg) {
   const item = s.currentReceive;
   if (!item || !msg || safeId(msg.id) !== item.id) return;
 
-  // 完整性校验：字节数不符就明确报错，不再静默保存坏文件
-  if (s.receivedBytes === item.size) {
-    item.blob = new Blob(s.receivedChunks, { type: item.type });
-    item.status = 'received';
+  // 完整性校验：字节数不符就明确报错，不再静默保存坏文件（原语义不变）
+  if (s.receivedBytes !== item.size) {
+    item.status = 'failed';
+    showToast(`文件 "${item.name}" 传输不完整（${formatFileSize(s.receivedBytes)}/${formatFileSize(item.size)}）`, 'error');
+    // W3: 已写字节保留为 .partial（如曾开流式落盘）；流式柄不存在则原样蒸发（手机端语义不变）
+    settleFileSink(item, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(item); });
+    finishReceiveCleanup(s, item);
+    return;
+  }
+
+  // W3: 先提交流式落盘——正式名文件已在盘上时直接提升为 item.blob（零二次落
+  // 盘、中断窗口归零）；无 sink / 提交失败 → 原路径 Blob 组装
+  settleFileSink(item, 'complete').then(mode => {
+    if (mode === 'file') {
+      item.status = 'received';
+    } else {
+      item.blob = new Blob(s.receivedChunks, { type: item.type });
+      item.status = 'received';
+    }
     item.progress = 100;
     item.totalMs = Date.now() - (item._t0 || Date.now());
     cacheReceivedBlob(s, item); // 会话断开后仍能下载未另存的文件
@@ -5206,11 +5421,12 @@ function finishReceive(s, msg) {
     chatHistoryAppend(s, { id: item.id, dir: 'in', kind: 'file', name: item.name, size: item.size, type: item.type, storageKey: item.storageKey, addedAt: item.addedAt || Date.now() });
     updateFriendTransferByRemote(s);
     addHistoryEntry({ dir: 'in', kind: 'file', name: item.name, size: item.size, peer: sessionDisplayName(s), code: sessionDeviceCode(s) });
-  } else {
-    item.status = 'failed';
-    showToast(`文件 "${item.name}" 传输不完整（${formatFileSize(s.receivedBytes)}/${formatFileSize(item.size)}）`, 'error');
-  }
+    finishReceiveCleanup(s, item);
+  });
+}
 
+// finishReceive 共用收尾：W3 complete 分支异步化后与失败路径共享清理
+function finishReceiveCleanup(s, item) {
   stopRenderHeartbeat(item);
   s.currentReceive = null;
   s.receivedChunks = [];
@@ -5222,6 +5438,8 @@ function abortReceive(s, msg) {
   const item = s.currentReceive;
   if (!item || !msg || safeId(msg.id) !== item.id) return;
   item.status = 'failed';
+  // W3: 对端中止 → 已写字节保留为 .partial（流式路径存在时）
+  settleFileSink(item, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(item); });
   stopRenderHeartbeat(item);
   s.currentReceive = null;
   s.receivedChunks = [];
@@ -5364,7 +5582,12 @@ function closeSession(s) {
   s.fileQueue.forEach(stopRenderHeartbeat);
   s.receivedFiles.forEach(stopRenderHeartbeat);
   if (s.currentTransfer) s.currentTransfer.status = 'failed';
-  if (s.currentReceive) s.currentReceive.status = 'failed';
+  if (s.currentReceive) {
+    const it = s.currentReceive;
+    it.status = 'failed';
+    // W3: 会话清理 → 中断提交（已写字节保留为 .partial）；fire-and-forget 不阻塞
+    settleFileSink(it, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(it); });
+  }
   try { if (s.conn) s.conn.close(); } catch (e) { /* noop */ }
   sessions.delete(s.key);
 
@@ -5607,6 +5830,11 @@ async function saveBlobToDir(blob, filename) {
 
 async function saveReceivedBlob(item) {
   const speed = formatSpeed(item.size / ((item.totalMs || 1) / 1000));
+  // W3 流式落盘：文件已由 sink 完整写入授权目录并原子落盘为正式名 → 直接认领，避免二次落盘生成 "(1)" 副本
+  if (item._streamSavedTo) {
+    showToast(`文件 "${item.name}" 已保存到 ${item._streamSavedTo}（${speed}）`, 'success');
+    return;
+  }
   const saved = await saveBlobToDir(item.blob, item.name);
   if (saved && downloadDirHandle) {
     showToast(`文件 "${item.name}" 已保存到 ${downloadDirHandle.name}（${speed}）`, 'success');
@@ -5624,7 +5852,8 @@ function loadSettingsUI() {
   if (ss) {
     let stun = '';
     try { stun = localStorage.getItem('easydrop_stun') || ''; } catch (e) { /* noop */ }
-    ss.value = stun || 'stun:stun.l.google.com:19302';
+    // 空 = 使用内置多组并探（不再回填任何硬编码默认服务器值）
+    ss.value = stun;
   }
   const di = document.getElementById('deviceIdDisplay');
   if (di) di.textContent = myDeviceId;
@@ -5642,6 +5871,8 @@ function saveSettings() {
   const stun = ss ? ss.value.trim() : '';
   if (stun) {
     try { localStorage.setItem('easydrop_stun', stun); } catch (e) { /* noop */ }
+  } else {
+    try { localStorage.removeItem('easydrop_stun'); } catch (e) { /* noop */ } // 留空保存 = 恢复内置默认组
   }
   updateHomeInfo();
   updateUserStatus();
@@ -5719,6 +5950,7 @@ function showToast(message, type = 'info') {
 // ==================== Initialize ====================
 document.addEventListener('DOMContentLoaded', async () => {
   ensureIdentity();
+  migrateLegacyStun(); // A：旧版 Google STUN 残留自愈（先于 loadSettingsUI/initializePeer，本 boot 即用干净配置）
   loadFriends();
   renderFriendsList();
   setupFileInput();
