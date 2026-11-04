@@ -6160,8 +6160,9 @@ function finishInterruptedSession(s) {
 }
 
 // 「传输中断」卡片：复用选择弹窗壳（Esc/背板/× 均可关闭，与站内弹窗一致）。
-// subtext 可覆盖副标题（页面重载恢复场景说明文件需重选）；restored 条目没有
-// 文件句柄，不提供「重新发送」按钮
+// subtext 可覆盖副标题（页面重载恢复场景说明文件需重选）。restored 条目没有
+// 文件句柄，不提供「重新发送」，但提供「重新连接对方」一键重拨（重连后手动
+// 重选文件发送）
 function showInterruptCard(entries, subtext) {
   const rows = entries.map(e => `
     <div class="text-left bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
@@ -6172,6 +6173,9 @@ function showInterruptCard(entries, subtext) {
     </div>`).join('');
   const targets = [];
   entries.forEach(e => { if (e.isSend && e.deviceId && !e.restored) targets.push(e); });
+  const reconnectTargets = [];
+  const seenDevices = new Set();
+  entries.forEach(e => { if (e.deviceId && e.restored && !seenDevices.has(e.deviceId)) { seenDevices.add(e.deviceId); reconnectTargets.push(e); } });
   const html = `
     <div class="text-center mb-5">
       <div class="w-16 h-16 rounded-2xl bg-yellow-500/15 flex items-center justify-center mx-auto mb-4">
@@ -6187,6 +6191,11 @@ function showInterruptCard(entries, subtext) {
         <i class="fas fa-rotate-right"></i>
         重新发送
       </button>` : ''}
+      ${reconnectTargets.length ? `
+      <button id="interruptReconnectBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-link"></i>
+        重新连接对方
+      </button>` : ''}
       <button id="interruptOkBtn" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
         <i class="fas fa-check"></i>
         知道了
@@ -6201,6 +6210,17 @@ function showInterruptCard(entries, subtext) {
     targets.forEach(e => {
       interruptResendJobs.set(e.deviceId, { items: e.sendItems, at: Date.now() });
       resumeInterruptedSend(e.deviceId);
+    });
+  };
+  // 重载恢复卡（restored）：文件句柄已失，无「重新发送」，但保留一键重连——
+  // 重连后用户在聊天页手动重选文件发送。不建 interruptResendJobs：没有可
+  // 注入的条目，避免 hello 到达时误报「继续发送」
+  const rcBtn = document.getElementById('interruptReconnectBtn');
+  if (rcBtn) rcBtn.onclick = () => {
+    closeChoiceModal();
+    if (reconnectTargets.length) showToast('正在重新连接对方…', 'info');
+    reconnectTargets.forEach(e => {
+      dialDevice(e.deviceId).catch(() => { /* 失败提示由拨号栈负责 */ });
     });
   };
 }
