@@ -2565,6 +2565,7 @@ document.addEventListener('visibilitychange', () => {
     giveWakeGrace(); // 先给唤醒宽限：回前台瞬间心跳还没解冻恢复，别急着判死
     initPresenceBeacon();
     sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
+    wakeLockSync(); // 锁在切后台时被系统释放：回前台若传输仍在进行，重新申请
   }
 });
 
@@ -5304,6 +5305,7 @@ async function sendFileOn(s, fileId) {
   item.sentBytes = 0;
   item.totalMs = null;
   startRenderHeartbeat(item, renderFileQueue);
+  wakeLockSync(); // 传输开始 → 保持屏幕常亮
   renderFileQueue(true);
 
   try {
@@ -5369,6 +5371,7 @@ async function sendFileOn(s, fileId) {
     s.currentTransfer = null;
     // 该会话队列中还有等待的文件则自动接续发送
     setTimeout(() => processSendQueue(s), 50);
+    wakeLockSync(); // 单文件终态（完成/失败）：无接续则释放，有接续则取消缓冲继续持锁
   }
 }
 
@@ -5624,6 +5627,7 @@ function beginReceive(s, msg) {
   beginFileSink(item); // W3: 授权目录可用时预开流式落盘柄（异步；失败回落全内存路径）
   item._t0 = Date.now();
   startRenderHeartbeat(item, () => renderChat());
+  wakeLockSync(); // 接收开始 → 保持屏幕常亮
   // 后台会话收到新内容 → 未读 + tab 徽标 + 提示
   if (isChatNotViewed(s)) {
     s.unread = (s.unread || 0) + 1;
@@ -5693,6 +5697,7 @@ function finishReceiveCleanup(s, item) {
   s.receivedChunks = [];
   s.receivedBytes = 0;
   renderReceivedFiles(true);
+  wakeLockSync(); // 接收终态漏斗（完成/不完整共用）→ 释放
 }
 
 function abortReceive(s, msg) {
@@ -5707,6 +5712,7 @@ function abortReceive(s, msg) {
   s.receivedBytes = 0;
   renderReceivedFiles(true);
   showToast(`对方中止了 "${item.name}" 的传输`, 'warning');
+  wakeLockSync(); // 对端中止 → 释放
 }
 
 function renderReceivedFiles(force) { renderChat(force); }
@@ -5824,6 +5830,77 @@ function showReceivedText(s, content, label) {
   addHistoryEntry({ dir: 'in', kind: 'text', name: label, size: content.length, peer: sessionDisplayName(s), code: sessionDeviceCode(s) });
 }
 
+// ==================== Screen Wake Lock（传输期间保持屏幕常亮） ====================
+// 手机熄屏/切后台后系统会冻结页面：WebRTC 心跳停发 → 40s 内被对端判死，
+// 传输中断。这是浏览器系统级管制，代码无法绕过；网页侧唯一无损的缓解
+// 手段是传输期间申请 Screen Wake Lock，让屏幕保持点亮、页面不被冻结。
+// 铁律：只在「确有传输进行」时持锁（页面任何静止时刻都不带锁）；浏览器
+// 不支持或用户拒绝时静默降级（仅一次性 console），传输完全不受影响。
+let wakeSentinel = null;        // 当前 WakeLockSentinel（切后台时被系统自动释放）
+let wakeWanted = false;         // 业务期望：此刻应持有锁（每次 wakeLockSync 重算）
+let wakeReleaseTimer = null;    // 收尾缓冲：短暂无活动不立刻放（桥接批次接缝）
+let wakeSilentOnce = false;     // 不支持/被拒只记一次日志，不反复刷
+
+// 此刻是否真的有传输在进行：任一会话的发送中(currentTransfer)/接收中
+// (currentReceive)。虚拟只读窗口不参与。
+function wakeTransferActive() {
+  let active = false;
+  sessions.forEach(s => {
+    if (!s || s.closed || s.virtual) return;
+    if (s.currentTransfer || s.currentReceive) active = true;
+  });
+  return active;
+}
+
+async function wakeLockAcquire() {
+  if (wakeSentinel || !wakeWanted) return;
+  if (!('wakeLock' in navigator)) {
+    if (!wakeSilentOnce) {
+      wakeSilentOnce = true;
+      console.log('[wake-lock] 浏览器不支持 Screen Wake Lock，跳过屏幕常亮（传输不受影响）');
+    }
+    return;
+  }
+  if (document.hidden) return; // hidden 时 request 必拒：留给回前台 visibilitychange 补申请
+  try {
+    const st = await navigator.wakeLock.request('screen');
+    if (!wakeTransferActive()) { try { st.release(); } catch (e) { /* noop */ } return; } // 拿到锁时传输恰好全部结束
+    wakeSentinel = st;
+    console.log('[wake-lock] 传输期间保持屏幕常亮');
+    st.addEventListener('release', () => {
+      wakeSentinel = null;
+      // 系统释放（切后台/手动锁屏）属正常现象：回前台后由 visibilitychange 自动补申请
+      console.log('[wake-lock] 屏幕常亮锁被释放（切后台/锁屏，或传输已结束）');
+    });
+  } catch (e) {
+    if (!wakeSilentOnce) {
+      wakeSilentOnce = true;
+      console.warn('[wake-lock] 申请未成功（' + ((e && e.name) || 'unknown') + '），静默降级，传输不受影响');
+    }
+  }
+}
+
+// 唯一对外入口：传输开始/结束的各条路径上都调用这一行，据此自动进锁/出锁。
+// 采用「状态重算」而非计数器——多会话并行传输与各类终态（完成/失败/中断）
+// 反复交错也不会漏放或多持。
+function wakeLockSync() {
+  wakeWanted = wakeTransferActive();
+  if (wakeWanted) {
+    if (wakeReleaseTimer) { clearTimeout(wakeReleaseTimer); wakeReleaseTimer = null; }
+    wakeLockAcquire();
+  } else if (!wakeReleaseTimer) {
+    // 400ms 收尾缓冲：同一批次相邻文件之间 processSendQueue 有 ~50ms 的
+    // 继发空档，缓冲把整批桥接成一次连续持锁，避免逐文件反复申请/释放
+    wakeReleaseTimer = setTimeout(() => {
+      wakeReleaseTimer = null;
+      if (wakeTransferActive()) return; // 缓冲期内又开始了新传输：不释放
+      const st = wakeSentinel;
+      wakeSentinel = null;
+      if (st) { try { st.release(); } catch (e) { /* noop */ } console.log('[wake-lock] 传输结束，屏幕常亮已解除'); }
+    }, 400);
+  }
+}
+
 // ==================== Connection Management ====================
 // 断开当前展示的会话（本地记录窗口则为关闭窗口）
 function disconnect() {
@@ -5850,6 +5927,7 @@ function closeSession(s) {
     // W3: 会话清理 → 中断提交（已写字节保留为 .partial）；fire-and-forget 不阻塞
     settleFileSink(it, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(it); });
   }
+  wakeLockSync(); // 会话收尾（手动断开/心跳判死/ICE failed/握手超时）→ 释放
   try { if (s.conn) s.conn.close(); } catch (e) { /* noop */ }
   sessions.delete(s.key);
 
