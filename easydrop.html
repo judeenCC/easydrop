@@ -194,6 +194,17 @@ tailwind.config = {
     box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
   }
 
+  /* 聊天窗口拖放反馈：已连接=靛蓝高亮「可松手」；未连接=红色禁止（松手不接收） */
+  #sendInterface.dragover {
+    outline: 2px dashed rgba(99, 102, 241, 0.55);
+    outline-offset: -4px;
+  }
+  #sendInterface.drag-forbidden {
+    outline: 2px dashed rgba(239, 68, 68, 0.55);
+    outline-offset: -4px;
+    cursor: not-allowed;
+  }
+
   .progress-bar {
     background: linear-gradient(90deg, #6366f1, #06b6d4, #8b5cf6);
     background-size: 200% 100%;
@@ -335,7 +346,7 @@ tailwind.config = {
     color: #64748b;
   }
 
-  /* ==== 主页分段式标签页：四等分铺满，窄屏不溢出、不偏移 ==== */
+  /* ==== 主页标签样式：顶栏三大版块与 WebRTC 版块内子标签共用 ==== */
   .seg-tab {
     display: flex;
     align-items: center;
@@ -357,6 +368,97 @@ tailwind.config = {
   }
   @media (min-width: 640px) {
     .seg-tab { padding: 0.625rem 1rem; font-size: 0.9375rem; }
+  }
+
+  /* ==== 首页入口区（Figma 改版#1）：纵排两枚渐变按钮；点击后按钮随玻璃卡片从中心向下展开，
+     面板表单自上而下逐项淡入。实现要点：卡片背景/内衬随 entryZone[data-open] 过渡；
+     面板高度用 grid-template-rows 0fr→1fr 动画（不依赖 JS 测量高度，内容变化自适应）。 ==== */
+  .entry-pill {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+    width: 250px; max-width: 78vw; height: 45px;
+    border-radius: 9999px; color: #ffffff;
+    font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.01em;
+    background: linear-gradient(100deg, #6366f1, #0891b2); /* 与分段标签激活态/主按钮同源渐变 */
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+    cursor: pointer; white-space: nowrap;
+    transition: transform 0.2s ease, box-shadow 0.25s ease, opacity 0.25s ease;
+  }
+  .entry-pill:hover { transform: translateY(-1.5px); box-shadow: 0 7px 18px rgba(99, 102, 241, 0.42); }
+  .entry-pill:active { transform: translateY(0) scale(0.985); }
+  /* 有活动会话时出现的"聊天"入口：玻璃质感（弱于渐变按钮，主次分明） */
+  .entry-pill-ghost {
+    background: rgba(255, 255, 255, 0.82); color: #64748b;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .entry-pill-ghost:hover { color: #334155; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08); }
+
+  .entry-card {
+    width: 100%; max-width: 56rem; margin-left: auto; margin-right: auto;
+    box-sizing: border-box;
+    border: 1px solid transparent; border-radius: 1.5rem;
+    padding: 0; background: transparent; box-shadow: none;
+    transition: padding 0.45s cubic-bezier(0.22, 0.85, 0.3, 1),
+                background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.45s ease;
+  }
+  /* 展开态：玻璃卡片从按钮处出现（顶部内衬把激活按钮托到卡片头部，其余按钮合并消失） */
+  #entryZone[data-open="send"] .entry-card,
+  #entryZone[data-open="receive"] .entry-card,
+  #entryZone[data-open="chat"] .entry-card {
+    padding-top: 1.625rem; padding-bottom: 2rem;
+    padding-left: 1rem; padding-right: 1rem;
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  }
+  @media (min-width: 640px) {
+    #entryZone[data-open="send"] .entry-card,
+    #entryZone[data-open="receive"] .entry-card,
+    #entryZone[data-open="chat"] .entry-card { padding-left: 2rem; padding-right: 2rem; }
+  }
+  /* 展开时：其余入口按钮隐藏（视觉上"合并"进卡片） */
+  #entryZone[data-open="send"] #entryBtnRecv,
+  #entryZone[data-open="send"] #entryBtnChat,
+  #entryZone[data-open="receive"] #entryBtnSend,
+  #entryZone[data-open="receive"] #entryBtnChat,
+  #entryZone[data-open="chat"] #entryBtnSend,
+  #entryZone[data-open="chat"] #entryBtnRecv { display: none; }
+  /* 聊天展开时激活的聊天按钮加深，标识当前所在面板 */
+  #entryZone[data-open="chat"] #entryBtnChat {
+    background: #475569; color: #ffffff;
+    box-shadow: 0 4px 14px rgba(51, 65, 85, 0.35);
+  }
+
+  /* 面板高度动画：grid-rows 0fr→1fr（内容由 JS 挂载进来，单行网格）。
+     可见性配合 visibility 延迟：收起时先收高度、0.5s 后再隐藏（不抢焦点），
+     展开时立即可见——纯 CSS，无 JS 定时器参与显隐 */
+  .entry-slot {
+    display: grid; grid-template-rows: 0fr;
+    overflow: hidden; visibility: hidden;
+    transition: grid-template-rows 0.5s cubic-bezier(0.22, 0.85, 0.3, 1),
+                visibility 0s linear 0.5s;
+  }
+  .entry-slot.open {
+    grid-template-rows: 1fr; visibility: visible;
+    transition: grid-template-rows 0.5s cubic-bezier(0.22, 0.85, 0.3, 1),
+                visibility 0s;
+  }
+  .entry-slot > * { min-height: 0; margin-top: 0; transition: margin-top 0.5s cubic-bezier(0.22, 0.85, 0.3, 1); }
+  /* 间距放到展开态：0fr 轨道的最小尺寸仍会计入子元素 margin（收起时泄漏 12px），收起必须归零 */
+  .entry-slot.open > * { margin-top: 0.75rem; }
+
+  /* 展开时卡片内容自上而下逐项淡入（延迟序号由 JS 设置，≤400ms 封顶） */
+  .entry-slot .panel-card > * {
+    transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.22, 0.85, 0.3, 1.05);
+  }
+  .entry-item-hidden { opacity: 0; transform: translateY(14px) scale(0.985); }
+  /* 面板自身的白卡样式在入口卡片内去掉（避免卡片套卡片，外层由 entry-card 承担） */
+  #entryZone .panel-card {
+    background: transparent !important; border: none !important;
+    box-shadow: none !important; backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important; padding: 0 !important;
   }
 
   /* ==== 布局基础：统一内容宽度，避免切换视图时左右跳动 ==== */
@@ -396,6 +498,9 @@ tailwind.config = {
       animation: none !important;
     }
     .friend-card, .btn-primary, .drop-zone { transition: none !important; }
+    /* 首页入口展开动画同样减弱：直接呈现最终态 */
+    .entry-slot, .entry-card, .entry-pill, .entry-slot .panel-card > * { transition: none !important; }
+    .entry-item-hidden { opacity: 1 !important; transform: none !important; }
   }
 </style>
 </head>
@@ -448,11 +553,6 @@ tailwind.config = {
             <i class="fas fa-cog text-slate-500"></i>
           </button>
 
-          <button onclick="openHistory()" class="h-10 w-10 sm:w-auto sm:px-4 flex-shrink-0 rounded-xl glass hover:bg-slate-100 flex items-center justify-center gap-2 transition-all text-sm text-slate-600" title="查看传输记录">
-            <i class="fas fa-clock-rotate-left text-slate-500"></i>
-            <span class="hidden sm:inline">传输记录</span>
-          </button>
-
           <span id="userStatus" class="flex items-center gap-2 px-3 h-10 rounded-full glass text-xs flex-shrink-0" title="我的昵称（可在设置中修改）">
             <span class="hidden sm:flex w-6 h-6 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 items-center justify-center text-[10px] text-white font-bold" id="userAvatar"></span>
             <span class="text-slate-600 font-medium max-w-[8rem] truncate" id="userDisplayName">我的设备</span>
@@ -465,7 +565,7 @@ tailwind.config = {
   <!-- Main Content -->
   <main class="w-full flex-1 flex flex-col px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
 
-    <!-- ==================== 主页（分段式标签页） ==================== -->
+    <!-- ==================== 主页（三大版块：WebRTC / LocalSend / 传输记录） ==================== -->
     <div id="homeSection" class="animate-fade-in flex flex-col">
 
       <!-- Hero Section -->
@@ -478,19 +578,54 @@ tailwind.config = {
         </p>
       </div>
 
-      <!-- 分段式标签栏：五等分，宽度固定居中；"会话"页常驻承载所有活动的会话 -->
+      <!-- 顶栏标签：三大版块完全隔离（WebRTC / LocalSend / 传输记录） -->
       <div class="mb-5 sm:mb-6">
-        <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-5 gap-1 w-full max-w-2xl mx-auto">
-          <button onclick="onTabClick('friends')" data-tab="friends" class="seg-tab">好友列表</button>
-          <button onclick="onTabClick('send')" data-tab="send" class="seg-tab">我要发送</button>
-          <button onclick="onTabClick('receive')" data-tab="receive" class="seg-tab">我要接收</button>
+        <div id="mainTabs" class="glass rounded-full p-1.5 grid grid-cols-3 gap-1 w-full max-w-2xl mx-auto">
+          <button onclick="onTabClick('webrtc')" data-tab="webrtc" class="seg-tab">WebRTC</button>
           <button onclick="onTabClick('localsend')" data-tab="localsend" class="seg-tab">LocalSend</button>
-          <button onclick="onTabClick('chat')" data-tab="chat" class="seg-tab">会话<span id="chatTabBadge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] leading-none">0</span></button>
+          <button onclick="onTabClick('history')" data-tab="history" class="seg-tab">传输记录</button>
         </div>
       </div>
 
-      <!-- 标签内容区：各功能视图由 JS 在初始化时移入此处（页面整体滚动，不使用嵌套滚动） -->
+      <!-- 标签内容区：historyMode / localsendMode 由 JS 在初始化时移入此处（页面整体滚动，不使用嵌套滚动） -->
       <div id="tabContent" class="w-full">
+
+        <!-- WebRTC 首页（Figma 改版#1）：两枚纵排入口按钮；点击后按钮随玻璃卡片从中心向下展开，
+             面板表单自上而下逐项淡入；再点一次当前展开的按钮即收起。聊天不再占用常驻子标签：
+             存在活动会话时出现"聊天"玻璃按钮（带未读徽标），以同样方式向下展开（顶部可返回首页）。 -->
+        <div id="webrtcMode" class="hidden animate-fade-in">
+          <div id="entryZone" data-open="none" class="mb-6 sm:mb-8">
+            <div id="entryCard" class="entry-card">
+              <div id="entryBtnRow" class="flex flex-col items-center gap-[17px]">
+                <button id="entryBtnSend" type="button" onclick="onWebRTCSubClick('send')" data-entry="send" class="entry-pill">我要发送</button>
+                <button id="entryBtnRecv" type="button" onclick="onWebRTCSubClick('receive')" data-entry="receive" class="entry-pill">我要接收</button>
+                <button id="entryBtnChat" type="button" onclick="onWebRTCSubClick('chat')" data-entry="chat" class="entry-pill entry-pill-ghost hidden">聊天<span id="chatTabBadge" class="hidden ml-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] leading-none">0</span></button>
+              </div>
+
+              <!-- 面板槽位：sendMode / receiveMode / chatMode 由 JS 在初始化时移入；
+                   可见性 + 高度动画（grid 0fr→1fr）+ 内容逐项淡入由 setWebRTCSub 控制 -->
+              <div id="entrySlots">
+                <div id="webrtcSubSend" class="entry-slot"></div>
+                <div id="webrtcSubReceive" class="entry-slot"></div>
+                <!-- 聊天页：单一包裹层保持 grid 单行结构（顶部返回按钮 + 挂载点） -->
+                <div id="webrtcSubChat" class="entry-slot">
+                  <div>
+                    <div class="page-panel mb-3">
+                      <button type="button" onclick="backToEntryZone()" class="px-3 py-1.5 rounded-full glass hover:bg-white text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1.5 transition-colors">
+                        <i class="fas fa-chevron-left text-[10px]"></i>返回首页
+                      </button>
+                    </div>
+                    <div id="chatMount"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 好友列表：常驻在入口区下方，friendsMode 由 JS 移入 -->
+          <div id="webrtcFriendsArea" class="mt-6"></div>
+        </div>
+
       </div>
 
     </div>
@@ -665,7 +800,7 @@ tailwind.config = {
         </div>
 
         <!-- 聊天窗口（图1新样式）：白底大卡片，顶部居中昵称/状态，右侧断开 -->
-        <div id="sendInterface" class="hidden page-panel">
+        <div id="sendInterface" class="hidden page-panel relative">
           <div class="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 sm:p-6">
             <div class="relative flex flex-col items-center gap-0.5 pb-3 border-b border-slate-100">
               <p class="text-base sm:text-lg font-semibold text-slate-800" id="chatPeerName">对方设备</p>
@@ -678,24 +813,40 @@ tailwind.config = {
             <div id="chatMessages" class="h-[46vh] min-h-[320px] overflow-y-auto overflow-x-hidden flex flex-col gap-3 py-4 px-1">
               <div id="chatEmptyHint" class="m-auto text-center text-slate-400 text-sm py-10">
                 <i class="fas fa-share-nodes text-3xl text-slate-300 block mb-3"></i>
-                连接已建立，拖入文件或发送消息开始传输
+                <span id="chatEmptyHintText">连接已建立，拖入文件或发送消息开始传输</span>
               </div>
             </div>
 
             <div id="chatInputBar" class="bg-slate-50 border border-slate-200 rounded-full pl-2 pr-2 py-1.5 flex items-center gap-1 transition-all">
               <input type="file" id="fileInput" multiple class="hidden">
               <input type="file" id="folderInput" webkitdirectory multiple class="hidden">
-              <button onclick="document.getElementById('fileInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
+              <button id="chatAddFileBtn" disabled data-tip="发送文件" data-tip-off="对方未连接，无法发送文件" onclick="document.getElementById('fileInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
                 <i class="fas fa-plus text-slate-500"></i>
               </button>
-              <button onclick="document.getElementById('folderInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送整个文件夹（含子文件夹内所有文件）">
+              <button id="chatAddFolderBtn" disabled data-tip="发送整个文件夹（含子文件夹内所有文件）" data-tip-off="对方未连接，无法发送文件夹" onclick="document.getElementById('folderInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0" title="发送整个文件夹（含子文件夹内所有文件）">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.1H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
               </button>
-              <button onclick="sendClipboard()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
+              <button id="chatAddClipBtn" disabled data-tip="发送剪贴板内容" data-tip-off="对方未连接，无法发送剪贴板" onclick="sendClipboard()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
                 <i class="fas fa-clipboard text-slate-400"></i>
               </button>
-              <input type="text" id="chatTextInput" placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-transparent px-2 text-sm outline-none text-slate-700 placeholder-slate-400" onkeydown="if(event.key==='Enter')sendChatText()" onpaste="handleChatPaste(event)">
-              <button onclick="sendChatText()" id="chatSendBtn" class="px-4 h-10 rounded-full text-sm font-medium text-primary-500 hover:bg-primary-500/10 transition-all flex-shrink-0 disabled:text-slate-300 disabled:hover:bg-transparent">发送</button>
+              <input type="text" id="chatTextInput" disabled placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-transparent px-2 text-sm outline-none text-slate-700 placeholder-slate-400" onkeydown="if(event.key==='Enter')sendChatText()" onpaste="handleChatPaste(event)">
+              <button disabled onclick="sendChatText()" id="chatSendBtn" class="px-4 h-10 rounded-full text-sm font-medium text-primary-500 hover:bg-primary-500/10 transition-all flex-shrink-0 disabled:text-slate-300 disabled:hover:bg-transparent">发送</button>
+            </div>
+          </div>
+
+          <!-- 拖放反馈浮层（pointer-events:none 不干扰放置事件）：已连接=松手发送；未连接=禁止 -->
+          <div id="chatDragOverlay" class="hidden absolute inset-0 z-30 pointer-events-none">
+            <div id="chatDragDropHint" class="hidden absolute inset-0 rounded-3xl bg-primary-500/10 flex items-center justify-center">
+              <div class="flex flex-col items-center gap-1.5 bg-white/95 px-5 py-3.5 rounded-2xl shadow-lg">
+                <i class="fas fa-download text-xl text-primary-500"></i>
+                <p class="text-xs font-medium text-primary-500">松开鼠标，发送文件到本会话</p>
+              </div>
+            </div>
+            <div id="chatDragBanHint" class="hidden absolute inset-0 rounded-3xl bg-red-500/10 flex items-center justify-center">
+              <div class="flex flex-col items-center gap-1.5 bg-white/95 px-5 py-3.5 rounded-2xl shadow-lg">
+                <svg class="w-8 h-8 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/></svg>
+                <p class="text-xs font-medium text-red-500">对方未连接，无法接收文件</p>
+              </div>
             </div>
           </div>
         </div>
@@ -705,10 +856,9 @@ tailwind.config = {
             <i class="fas fa-comments text-3xl text-primary-500"></i>
           </div>
           <h3 class="text-xl font-semibold mb-2 text-slate-700">还没有活动连接</h3>
-          <p class="text-slate-400 text-sm mb-6">从好友列表发起连接，或用连接码 / LocalSend 建立连接后，会话会出现在这里</p>
+          <p class="text-slate-400 text-sm mb-6">从好友列表发起连接，或用连接码建立连接后，会话会出现在这里</p>
           <div class="flex flex-wrap justify-center gap-3">
-            <button onclick="onTabClick('friends')" class="px-6 py-3 rounded-xl btn-primary text-white font-medium whitespace-nowrap">去好友列表连接</button>
-            <button onclick="onTabClick('localsend')" class="px-6 py-3 rounded-xl glass text-slate-700 font-medium whitespace-nowrap">LocalSend 快速直连</button>
+            <button onclick="focusWebrtcFriends()" class="px-6 py-3 rounded-xl btn-primary text-white font-medium whitespace-nowrap">去好友列表连接</button>
           </div>
         </div>
       </div>
@@ -760,7 +910,7 @@ tailwind.config = {
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <h3 class="text-xl font-semibold text-slate-800">传输记录</h3>
-            <p class="text-sm text-slate-400">本机最近的收发记录，仅保存在本地浏览器 · 点击可回到对应的会话</p>
+            <p class="text-sm text-slate-400">本机最近的收发记录，仅保存在本地浏览器 · 点击打开对应会话（对方不在线也可查看聊天记录）</p>
           </div>
           <button onclick="clearHistory()" id="clearHistoryBtn" class="hidden px-4 py-2 rounded-xl glass hover:bg-red-50 hover:text-red-500 transition-all text-sm text-slate-600">
             <i class="fas fa-trash mr-1"></i>
@@ -780,19 +930,20 @@ tailwind.config = {
       </div>
     </div>
 
-    <!-- LocalSend Mode：LocalSend 式速传——选设备直连，拖入文件即发 -->
+    <!-- LocalSend Mode：独立局域网速传模块——只做同网段设备发现与直连，
+         不展示/不使用任何 WebRTC 数据（好友、跨网信标、连接地址均不进入本模块） -->
     <div id="localsendMode" class="hidden animate-fade-in">
       <div class="page-panel">
         <div class="text-center mb-5">
           <h3 class="text-xl font-semibold text-slate-800">LocalSend 速传</h3>
-          <p class="text-slate-400 text-sm mt-1">选择设备即直连，拖入文件立即发送</p>
+          <p class="text-slate-400 text-sm mt-1">同一局域网内的设备自动出现，选择设备即直连</p>
           <p id="localsendNetStatus" class="text-xs text-slate-400 mt-2">局域网发现：启动中...</p>
         </div>
 
         <div id="localsendDeviceList" class="space-y-3"></div>
 
         <div id="localsendEmptyHint" class="hidden glass rounded-2xl p-6 text-center text-sm text-slate-400 mb-4">
-          暂未发现设备。同一网段的设备打开本页面后会自动出现在这里；也可在下方粘贴对方连接地址直接连接。
+          暂未发现设备。同一网段的设备打开本页面后会自动出现在这里。
         </div>
 
         <div class="glass rounded-2xl p-5 mt-4">
@@ -802,20 +953,10 @@ tailwind.config = {
             </div>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-700">本设备</p>
-              <p class="js-device-address text-xs text-slate-400 truncate code-display select-all">生成中...</p>
+              <p id="localsendSelfName" class="text-xs text-slate-400 truncate">--</p>
               <p class="js-lan-ip text-xs text-slate-400 mt-0.5">本机IP：检测中...</p>
             </div>
-            <button onclick="copyDeviceAddress()" class="w-10 h-10 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="复制连接地址">
-              <i class="fas fa-copy text-primary-500"></i>
-            </button>
           </div>
-        </div>
-
-        <div class="mt-4 flex flex-col sm:flex-row gap-2">
-          <input type="text" id="localsendAddressInput" placeholder="或粘贴对方连接地址，点连接发起请求" class="flex-1 bg-slate-50 rounded-xl px-4 py-3 text-sm outline-none border border-slate-200 focus:border-primary-500/50 text-slate-700">
-          <button onclick="localsendDialByAddress()" class="px-5 py-3 rounded-xl btn-primary text-white text-sm font-medium whitespace-nowrap">
-            <i class="fas fa-plug mr-1"></i>连接
-          </button>
         </div>
       </div>
     </div>
@@ -935,7 +1076,9 @@ tailwind.config = {
 // 这样连接码等待期间仍可接受/发起新连接，支持多会话并行
 let devicePeer = null;
 let codePeer = null;
-let currentTab = 'friends';
+let currentTab = 'webrtc';   // 顶栏版块：webrtc / localsend / history
+let webrtcSub = 'none';        // WebRTC 版块状态：send / receive / chat / none（none=首页入口卡片收起，好友列表不受状态控制）
+let lastHomeSub = 'none';      // 离开聊天页前所在的入口状态（"返回首页"用）
 let friends = [];
 
 // 多会话（同一时间可并行多条 P2P 连接）：
@@ -1207,19 +1350,24 @@ async function loadFriends() {
   try {
     const stored = localStorage.getItem('easydrop_friends');
     friends = stored ? JSON.parse(stored) : [];
+    let friendsDirty = false;
     // 存量记录里的 id/deviceId 可能来自修复前的恶意会话，载入时一并净化
     friends.forEach(f => {
       f.id = safeId(f.id);
       if (f.deviceId) f.deviceId = safeId(f.deviceId);
-      // 传输方式经历（LocalSend / WebRTC）与记住的默认选择
-      if (typeof f.lanUsed !== 'boolean') f.lanUsed = false;
-      if (typeof f.crossUsed !== 'boolean') f.crossUsed = false;
-      if (f.preferredTransfer !== 'lan' && f.preferredTransfer !== 'cross') f.preferredTransfer = null;
+      // 旧版「传输方式经历」字段（LocalSend / WebRTC）已随模块隔离废除：
+      // LocalSend 与 WebRTC 各自独立、互不存储对方信息，载入即清掉陈旧字段
+      if ('lanUsed' in f || 'crossUsed' in f || 'preferredTransfer' in f) {
+        delete f.lanUsed;
+        delete f.crossUsed;
+        delete f.preferredTransfer;
+        friendsDirty = true;
+      }
     });
     // 旧版 UUID 设备 ID 已作废（新版为 4 位识别码），清理无法再接通的旧好友
     const before = friends.length;
     friends = friends.filter(f => !f.deviceId || SHORT_CODE_RE.test(f.deviceId));
-    if (friends.length !== before) {
+    if (friendsDirty || friends.length !== before) {
       try { localStorage.setItem('easydrop_friends', JSON.stringify(friends)); } catch (e) { /* noop */ }
     }
   } catch (e) {
@@ -1350,105 +1498,26 @@ function renderFriendsList() {
   updateFriendOnlineIndicators();
 }
 
-// 在线状态：局域网信标或全局信标中能看到该识别码（任意实例）= 在线（纸飞机蓝色可点）
+// 在线状态（WebRTC 模块专用）：只在全局 presence 信标中能看到该识别码（任意实例）= 在线。
+// 局域网信标属于独立的 LocalSend 模块，不再参与好友纸飞机的在线判定
 // 注意：记录按实例信令 ID（sid）为键，这里按识别码扫描记录值
 function isDeviceIdSeenLive(deviceId) {
   if (!deviceId) return false;
-  const match = (rec) => rec && rec.id === deviceId;
-  return lanPeersLive().some(match) || Array.from(presencePeersLive().values()).some(match);
+  return Array.from(presencePeersLive().values()).some(rec => rec && rec.id === deviceId);
 }
 
 function isFriendOnline(friend) {
   return isDeviceIdSeenLive(friend.deviceId);
 }
 
-// ==================== 传输方式经历 / 状态点颜色 ====================
-// 记录这次会话用过的传输方式（LocalSend / WebRTC）：
-// 用于头像右下角状态点的颜色，以及“两种都用过”时的默认选择
-function markFriendTransferMode(code, mode) {
-  if (!code) return;
-  const f = friends.find(fr => fr.deviceId === code);
-  if (!f) return;
-  if (mode === 'lan' && !f.lanUsed) {
-    f.lanUsed = true;
-    saveFriends();
-  } else if (mode === 'cross' && !f.crossUsed) {
-    f.crossUsed = true;
-    saveFriends();
-  }
-  updateFriendOnlineIndicators();
-}
-
-// 状态点颜色：绿=LocalSend 在线；蓝=WebRTC 在线；紫=两种都用过；灰=离线
-function friendTransferStatus(f) {
-  if (!f || !f.deviceId) return 'gray';
-  const lanOnline = lanPeersLive().some(rec => rec.id === f.deviceId);
-  const crossOnline = Array.from(presencePeersLive().values()).some(rec => rec.id === f.deviceId);
-  if (!lanOnline && !crossOnline) return 'gray';
-  if (f.lanUsed && f.crossUsed) return 'purple';
-  if (lanOnline) return 'green';
-  return 'blue';
-}
-
-// 点击好友行/纸飞机：按状态点颜色选择传输方式；
-// 紫色时若有记住的选择就直接用，否则弹出选择框
+// 点击好友行/纸飞机：LocalSend 已拆分为独立模块，好友传输一律走 WebRTC 直连。
+// 头像状态点只反映 WebRTC 在线状态（蓝=在线，灰=离线）
 function initiateFriendTransfer(friendId) {
   const f = friends.find(x => x.id === friendId);
   if (!f) return;
   // 好友操作弹窗打开时点“发起传输”，先把操作弹窗收掉，避免两层弹窗叠加
   if (friendActionModalMode === 'actions') closeFriendModal();
-  const status = friendTransferStatus(f);
-  if (status === 'green') return connectToFriend(friendId, 'localsend');
-  if (status === 'blue') return connectToFriend(friendId, null);
-  if (status === 'purple') {
-    if (f.preferredTransfer === 'lan') return connectToFriend(friendId, 'localsend');
-    if (f.preferredTransfer === 'cross') return connectToFriend(friendId, null);
-    return showTransferModeModal(friendId);
-  }
-  // 离线：有记住的选择就按它来，否则默认 WebRTC
-  if (f.preferredTransfer === 'lan') return connectToFriend(friendId, 'localsend');
-  return connectToFriend(friendId, null);
-}
-
-function showTransferModeModal(friendId) {
-  const f = friends.find(x => x.id === friendId);
-  if (!f) return;
-  const colors = f.avatarColors || avatarColors[0];
-  const initials = (f.name || '?').charAt(0).toUpperCase();
-  openChoiceModal('选择传输方式', `
-    <div class="text-center mb-5">
-      <div class="friend-avatar w-16 h-16 rounded-2xl flex items-center justify-center text-white text-2xl font-bold mx-auto mb-2" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
-        ${esc(initials)}
-      </div>
-      <h4 class="font-semibold text-slate-800">${esc(f.name)}</h4>
-    </div>
-    <div class="space-y-3">
-      <button onclick="chooseTransferMode('${f.id}', 'lan')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
-        <i class="fas fa-wifi"></i>
-        发起文件传输 LocalSend
-      </button>
-      <button onclick="chooseTransferMode('${f.id}', 'cross')" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
-        <i class="fas fa-globe"></i>
-        发起文件传输 WebRTC
-      </button>
-      <label class="flex items-center gap-2 text-xs text-slate-500 mt-1">
-        <input type="checkbox" id="rememberTransferMode" class="rounded">
-        记住我的选择（以后自动使用）
-      </label>
-    </div>
-  `);
-}
-
-function chooseTransferMode(friendId, mode) {
-  const f = friends.find(x => x.id === friendId);
-  const remember = document.getElementById('rememberTransferMode');
-  if (f && remember && remember.checked) {
-    f.preferredTransfer = mode;
-    saveFriends();
-    showToast('已记住默认传输方式', 'success');
-  }
-  closeChoiceModal();
-  connectToFriend(friendId, mode === 'lan' ? 'localsend' : null);
+  connectToFriend(friendId, null);
 }
 
 // 好友在线颜色说明（顶部信息按钮）
@@ -1456,22 +1525,14 @@ function showOnlineLegend() {
   openChoiceModal('好友在线颜色说明', `
     <div class="space-y-4 text-sm text-slate-600">
       <div class="flex items-center gap-3">
-        <span class="w-3 h-3 rounded-full bg-green-500"></span>
-        <span>绿色：LocalSend 在线（同一局域网）</span>
-      </div>
-      <div class="flex items-center gap-3">
         <span class="w-3 h-3 rounded-full bg-blue-500"></span>
-        <span>蓝色：WebRTC 在线（跨网络）</span>
-      </div>
-      <div class="flex items-center gap-3">
-        <span class="w-3 h-3 rounded-full bg-purple-500"></span>
-        <span>紫色：LocalSend + WebRTC 都用过</span>
+        <span>蓝色：WebRTC 在线</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="w-3 h-3 rounded-full bg-slate-300"></span>
-        <span>灰色：当前未检测到对方在线</span>
+        <span>灰色：当前未检测到对方在线（点击纸飞机仍会尝试连接）</span>
       </div>
-      <p class="text-xs text-slate-400 mt-2">状态点位于好友头像右下角；点击卡片或纸飞机会按当前颜色对应的传输方式发起连接。</p>
+      <p class="text-xs text-slate-400 mt-2">状态点位于好友头像右下角；同网段设备的发现与直连在独立的 LocalSend 版块，不参与好友在线状态。</p>
       <div class="flex items-start gap-2 mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700">
         <i class="fas fa-circle-exclamation mt-0.5"></i>
         <p class="text-xs leading-relaxed">提示：清除浏览器数据、卸载浏览器或使用无痕模式，都会清除本机保存的好友、会话记录与接收文件缓存，且无法恢复。</p>
@@ -1500,8 +1561,7 @@ function updateFriendOnlineIndicators() {
   document.querySelectorAll('[data-friend-plane]').forEach(btn => {
     const id = btn.getAttribute('data-friend-plane');
     const friend = friends.find(f => f.deviceId === id);
-    const status = friendTransferStatus(friend);
-    const online = status !== 'gray';
+    const online = isFriendOnline(friend); // 仅 presence 信标判定（WebRTC 模块自身数据）
     btn.classList.toggle('bg-primary-500', online);
     btn.classList.toggle('hover:bg-primary-600', online);
     btn.classList.toggle('shadow-md', online);
@@ -1511,41 +1571,20 @@ function updateFriendOnlineIndicators() {
       icon.classList.toggle('text-white', online);
       icon.classList.toggle('text-slate-400', !online);
     }
-    // 状态点在头像右下角：绿=LocalSend，蓝=WebRTC，紫=两种都用过
+    // 状态点在头像右下角：蓝=WebRTC 在线，灰=离线
+    // （LocalSend 已拆为独立模块，局域网信标不再参与好友状态）
     const dot = document.querySelector('[data-friend-dot="' + (id || '') + '"]');
     if (dot) {
-      dot.classList.toggle('bg-green-500', status === 'green');
-      dot.classList.toggle('bg-blue-500', status === 'blue');
-      dot.classList.toggle('bg-purple-500', status === 'purple');
-      dot.classList.toggle('bg-slate-300', status === 'gray');
-      // 悬停提示：给出当前在线方式，紫色时同时说明“两种都用过”
-      const lanOnline = lanPeersLive().some(rec => rec.id === id);
-      const crossOnline = Array.from(presencePeersLive().values()).some(rec => rec.id === id);
-      let tipText = '';
-      if (status === 'purple') {
-        tipText = 'LocalSend + WebRTC 都用过';
-        if (lanOnline && crossOnline) tipText += ' · 当前都在线';
-        else if (lanOnline) tipText += ' · 当前 LocalSend 在线';
-        else if (crossOnline) tipText += ' · 当前 WebRTC 在线';
-        else tipText += ' · 当前离线';
-      } else if (status === 'green') {
-        tipText = 'LocalSend 在线';
-      } else if (status === 'blue') {
-        tipText = 'WebRTC 在线';
-      } else {
-        tipText = '当前离线';
-      }
+      dot.classList.toggle('bg-blue-500', online);
+      dot.classList.toggle('bg-slate-300', !online);
+      const tipText = online ? 'WebRTC 在线' : '当前离线';
       const tip = dot.querySelector('[data-friend-dot-text]');
       if (tip) tip.textContent = tipText;
       dot.title = tipText;
     }
-    btn.title = status === 'green'
-      ? 'LocalSend 在线 · 点击发起 LocalSend 传输'
-      : status === 'blue'
-        ? 'WebRTC 在线 · 点击发起 WebRTC 传输'
-        : status === 'purple'
-          ? 'LocalSend + WebRTC 都用过 · 点击选择传输方式'
-          : '未检测到对方在线 · 点击仍会尝试连接';
+    btn.title = online
+      ? 'WebRTC 在线 · 点击发起传输'
+      : '未检测到对方在线 · 点击仍会尝试连接';
   });
 }
 
@@ -1568,7 +1607,7 @@ function refreshOnlineDevices() {
     setTimeout(() => icon.classList.remove('animate-spin'), 900);
   }
   const n = discoveredPeerCount();
-  showToast('已刷新，当前发现 ' + n + ' 个在线实例', 'info');
+  showToast('已刷新，当前发现 ' + n + ' 台局域网设备', 'info');
 }
 
 function formatDate(dateString) {
@@ -1609,14 +1648,9 @@ function showFriendActions(friendId) {
     </div>
 
     <div class="space-y-3">
-      <button onclick="connectToFriend('${friend.id}', 'localsend')" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
-        <i class="fas fa-wifi"></i>
-        发起文件传输 LocalSend
-      </button>
-
-      <button onclick="connectToFriend('${friend.id}', null)" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
-        <i class="fas fa-globe"></i>
-        发起文件传输 WebRTC
+      <button onclick="connectToFriend('${friend.id}', null)" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-paper-plane"></i>
+        发起文件传输
       </button>
 
       <button onclick="showRenameForm('${friend.id}')" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
@@ -1882,7 +1916,10 @@ function renderHistory() {
   });
 }
 
-// 点击传输记录：回到该设备的对应会话；会话已断开则重新发起直连/拨号
+// 点击传输记录：回到该设备的对应会话。
+// 有活动会话 → 直接切换；对方在线 → 照旧按识别码重新握手（好友免确认，
+// 陌生人由对方弹窗把关）；对方当前不在线 → 不再发起注定失败的无望等待，
+// 而是打开该设备的本地聊天窗口（离线也可回看聊天/文件记录）
 function openHistorySession(item) {
   const code = SHORT_CODE_RE.test(String(item.code || '')) ? item.code : '';
   if (!code) {
@@ -1903,10 +1940,16 @@ function openHistorySession(item) {
     showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
-  // 记录对应的会话已不存在，直接按识别码重新握手（好友免确认，陌生人由对方弹窗把关）
   const existingFriend = friends.find(f => f.deviceId === code);
-  if (existingFriend) connectToFriend(existingFriend.id, 'history');
-  else dialDevice(code, 'history');
+  if (isDeviceIdSeenLive(code)) {
+    // 对方在线：直接拨号建立连接
+    if (existingFriend) connectToFriend(existingFriend.id, 'history');
+    else dialDevice(code, 'history');
+    return;
+  }
+  // 对方当前不在线：打开本地聊天窗口（只读记录视图），发送区随之置灰
+  openLocalChatWindow(code, item.peer || '');
+  showToast('对方目前不在线，已打开该会话的聊天记录', 'info');
 }
 
 function clearHistory() {
@@ -1914,6 +1957,66 @@ function clearHistory() {
   try { localStorage.removeItem(HISTORY_KEY); } catch (e) { /* noop */ }
   renderHistory();
   showToast('历史记录已清空', 'info');
+}
+
+// ==================== 本地聊天窗口（离线记录视图） ====================
+// 从「传输记录」点入时对方可能不在线：不再盲目拨号 20~25 秒后失败，
+// 而是打开一个无连接的轻量会话——只回填与该设备的本地聊天/文件记录
+// （接收过的文件仍可从本机缓存再次下载）。发送区随连接状态置灰、
+// 拖入文件显示禁止；真实连接建立时由 createSession 将该虚拟窗口
+// 关闭并把显示位无缝交给真实会话。
+const VIRTUAL_CHAT_PREFIX = 'local-chat-';
+
+function virtualChatKey(code) {
+  return VIRTUAL_CHAT_PREFIX + String(code || '').toUpperCase();
+}
+
+function findVirtualChatByCode(code) {
+  const s = sessions.get(virtualChatKey(code));
+  return (s && s.virtual && !s.closed) ? s : null;
+}
+
+// 窗口标题名：好友备注优先，其次取最近一条传输记录里的对方昵称
+function lookupLocalPeerName(code, fallback) {
+  const f = friends.find(fr => fr.deviceId === code);
+  if (f && f.name) return f.name;
+  if (fallback) return fallback;
+  const rec = transferHistory.find(h => h.code === code && h.peer);
+  return (rec && rec.peer) ? rec.peer : ('设备 ' + code);
+}
+
+function openLocalChatWindow(code, fallbackName) {
+  let s = findVirtualChatByCode(code);
+  if (!s) {
+    s = {
+      key: virtualChatKey(code),
+      conn: null,
+      virtual: true,                 // 无连接的记录视图：不参与心跳/ICE/拨号
+      isInitiator: false,
+      userConfirm: false,
+      codeHosted: false,
+      dialPurpose: 'local-chat',
+      identity: { deviceId: code, deviceName: lookupLocalPeerName(code, fallbackName) },
+      fileQueue: [],
+      receivedFiles: [],
+      chatTexts: [],
+      currentTransfer: null,
+      currentReceive: null,
+      receivedChunks: [],
+      receivedBytes: 0,
+      textAssembly: {},
+      unread: 0,
+      lastPong: 0,
+      created: Date.now(),
+      closed: false
+    };
+    sessions.set(s.key, s);
+    restoreChatHistory(s);
+    renderSessionChips();
+  }
+  setActiveSession(s.key);
+  switchTab('chat');
+  return s;
 }
 
 // ==================== IP / 地址互连 ====================
@@ -1983,13 +2086,16 @@ function detectLanIp() {
   });
 }
 
+// 本设备信息（LocalSend 版块）：昵称 + 局域网 IP。不展示 WebRTC 连接地址
 async function updateLanIpDisplay() {
   const els = document.querySelectorAll('.js-lan-ip');
+  const selfName = document.getElementById('localsendSelfName');
+  if (selfName) selfName.textContent = myDeviceName + '（本机）';
   if (els.length === 0) return;
   const ip = await detectLanIp();
   const text = ip
     ? '本机局域网IP：' + ip
-    : '本机IP：浏览器未暴露（隐私保护），连接请复制上方地址';
+    : '本机IP：浏览器未暴露（隐私保护）';
   els.forEach(el => { el.textContent = text; });
 }
 
@@ -2011,13 +2117,14 @@ function connectByInput() {
   }
   dialByAddress('connect', 'peerUidInput');
 }
-function localsendDialByAddress() { dialByAddress('connect', 'localsendAddressInput', 'localsend'); }
 
-// ==================== LocalSend 速传 + 局域网发现 ====================
-// 浏览器无 UDP 组播，借公共 MQTT-over-WebSocket 做信标总线：同一网段
-// （按探测到的局域网 IP 划分）的设备互发心跳即可"发现"彼此；连不上
-// 总线或拿不到本机 IP 时优雅降级（仅显示好友）。对端发来的名称展示前
-// 一律转义，拨号仍需对方确认弹窗把关
+// ==================== LocalSend 速传 + 局域网发现（独立模块） ====================
+// 本模块只做同网段设备发现与直连：数据源仅为局域网信标，不合并全局
+// presence 信标、不合并好友数据，也不展示/复制 WebRTC 连接地址，与
+// WebRTC 版块完全隔离。浏览器无 UDP 组播，借公共 MQTT-over-WebSocket
+// 做信标总线：同一网段（按探测到的局域网 IP 划分）的设备互发心跳即可
+// "发现"彼此；连不上总线或拿不到本机 IP 时优雅降级（空列表等待发现）。
+// 对端发来的名称展示前一律转义，拨号仍需对方确认弹窗把关
 let lanBeaconClient = null;
 let lanBrokerOk = false;
 let lanSubnet = 'unknown';
@@ -2053,11 +2160,10 @@ function updateLanNetStatus(text) {
   if (el) el.textContent = text;
 }
 
-// 当前「已发现在线设备」数：两通道合并按识别码去重（用于状态栏与刷新提示）
+// 当前「已发现在线设备」数：仅统计局域网信标（LocalSend 独立模块的数据源）
 function discoveredPeerCount() {
   const ids = new Set();
   lanPeersLive().forEach(p => ids.add(p.id));
-  presencePeersLive().forEach(p => ids.add(p.id));
   return ids.size;
 }
 
@@ -2098,7 +2204,6 @@ function handleLanBeaconPayload(text) {
     lanPeers.set(sid, { id: id, name: name, sid: sid, ts: Date.now() });
     renderLocalsendList();
     refreshLanStatus();
-    updateFriendOnlineIndicators(); // LAN 信标同样参与好友纸飞机的在线判定
   } catch (e) { /* 忽略畸形信标 */ }
 }
 
@@ -2338,9 +2443,6 @@ function handlePresencePayload(text) {
       t: Date.now() // 本机接收时刻：TTL 以此为准，跨设备时钟偏差免疫
     });
     updateFriendOnlineIndicators();
-    // 新设备上线/心跳续期 → LocalSend 列表若正开着就同步刷新
-    const lsMode = document.getElementById('localsendMode');
-    if (lsMode && !lsMode.classList.contains('hidden')) renderLocalsendList();
   } catch (e) { /* 忽略畸形信标 */ }
 }
 
@@ -2564,35 +2666,25 @@ function renderLocalsendList() {
   const hint = document.getElementById('localsendEmptyHint');
   if (!list) return;
 
-  // 合并三源（同一设备合并为一张卡）：
-  // 1) LAN 信标发现的设备（badge 局域网）
-  // 2) 全局 presence 信标发现的设备（badge 在线）——跨网/同网都能看到
-  // 3) 其余好友（badge 好友，离线灰）
-  // 同设备多实例（多标签页/实例后缀切换）只出一张卡：旧版按 sid 分行会出现
-  // 「两张一样的卡片」；拨号候选列表本就会尝试该识别码的全部实例
+  // 独立模块的数据源：只有局域网信标发现的设备。
+  // 不合并全局 presence 信标、不合并好友记录——WebRTC 的信息不出现在本版块。
+  // 同识别码多实例（多标签页/多窗口）合并为一张卡：拨号候选列表本就会
+  // 尝试该识别码的全部实例
   const rows = [];
-  const seenDeviceIds = new Set();
-  const pushRow = (rec, lan) => {
+  const pushRow = (rec) => {
     if (!rec || !rec.id) return;
-    const f = friends.find(fr => fr.deviceId === rec.id);
-    const isSelfAlias = rec.id === myDeviceId && !f;
-    const name = isSelfAlias ? rec.name + '（本机另一窗口）' : (f ? f.name : rec.name);
-    const ts = rec.ts || rec.t || 0;
+    const isSelfAlias = rec.id === myDeviceId;
+    const name = isSelfAlias ? rec.name + '（本机另一窗口）' : rec.name;
+    const ts = rec.ts || 0;
     const existing = rows.find(r => r.deviceId === rec.id);
     if (existing) {
-      if (lan) existing.lan = true; // 局域网徽标优先
       if (ts > (existing._ts || 0)) { existing._ts = ts; existing.name = name; }
       return;
     }
-    seenDeviceIds.add(rec.id);
-    rows.push({ deviceId: rec.id, friendId: f ? f.id : null, name, lan, isFriend: !!f, online: true, _ts: ts });
+    rows.push({ deviceId: rec.id, name, lan: true, _ts: ts });
   };
-  lanPeersLive().forEach(p => pushRow(p, true));
-  presencePeersLive().forEach(p => pushRow(p, false));
-  friends.forEach(f => {
-    if (!f.deviceId || seenDeviceIds.has(f.deviceId)) return;
-    rows.push({ deviceId: f.deviceId, friendId: f.id, name: f.name, lan: false, isFriend: true, online: false });
-  });
+  lanPeersLive().forEach(p => pushRow(p));
+  rows.sort((a, b) => (b._ts || 0) - (a._ts || 0));
 
   if (rows.length === 0) {
     list.innerHTML = '';
@@ -2603,24 +2695,12 @@ function renderLocalsendList() {
   list.innerHTML = '';
 
   rows.forEach(row => {
-    const f = friends.find(fr => fr.id === row.friendId);
-    const colors = (f && f.avatarColors) || avatarColors[0];
+    // 配色按昵称哈希取（本模块不读取好友的固定配色）
+    const colors = avatarColorsForText(row.name);
     const initials = (row.name || '?').charAt(0).toUpperCase();
-    const badgeCls = row.online ? 'bg-green-500/10 text-green-600' : 'bg-primary-500/10 text-primary-500';
-    const badgeText = row.lan
-      ? (row.isFriend ? '局域网 · 好友' : '局域网发现')
-      : (row.online
-        ? (row.isFriend ? '跨网在线 · 好友' : '跨网在线')
-        : '好友');
-    const badge = `<span class="px-2 py-0.5 rounded-full ${badgeCls} text-xs flex-shrink-0">${badgeText}</span>`;
+    const badge = `<span class="px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-500 text-xs flex-shrink-0">局域网发现</span>`;
     const busy = localsendDialTarget === row.deviceId;
-    const subtext = busy
-      ? '正在连接 · 再次点击可取消'
-      : (row.lan
-        ? (row.isFriend ? '局域网在线 · 点击一键直连' : '局域网在线 · 点击发起连接（对方需确认）')
-        : (row.online
-          ? '跨网在线 · 点击将通过 WebRTC 连接'
-          : '点击直连 · 对方在线时立即建立'));
+    const subtext = busy ? '正在连接 · 再次点击可取消' : '局域网在线 · 点击发起连接（对方需确认）';
 
     const el = document.createElement('div');
     el.className = 'friend-card glass rounded-2xl p-4 cursor-pointer';
@@ -2631,7 +2711,6 @@ function renderLocalsendList() {
           <div class="friend-avatar w-12 h-12 rounded-2xl flex items-center justify-center text-white text-lg font-bold" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">
             ${esc(initials)}
           </div>
-          ${row.online ? '<span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-white"></span>' : ''}
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
@@ -2651,7 +2730,7 @@ function renderLocalsendList() {
 function openLocalSend() {
   sessionHealthTick(); // 打开列表先跑一次健康巡检：死会话当场清掉、点击走重新拨号
   renderLocalsendList();
-  renderDeviceAddress();
+  updateLanIpDisplay();
   switchTab('localsend');
 }
 
@@ -2805,17 +2884,94 @@ function showIncomingRequestModal(opts) {
   };
 }
 
-// ==================== Tab Switching（分段式标签页版） ====================
-// 主页为常驻分段标签。多会话后切换标签不再受连接影响：聊天窗口常驻"聊天"标签，
-// 后台会话照常传输；拨号中切标签会自动取消当前拨号请求。
-function switchTab(tab) {
+// ==================== Tab Switching（三大版块 + 首页入口卡片区） ====================
+// 顶栏三个版块完全隔离：WebRTC 首页（两枚纵排入口按钮 我要发送/我要接收 + 有活动会话时
+// 动态出现的"聊天"按钮，好友列表常驻下方）、LocalSend、传输记录。入口按钮点击 → 玻璃卡片
+// 从按钮中心向下展开、面板内容逐项淡入；再点一次当前展开的按钮即收起。详情见下 setWebRTCSub。
+// 拨号中切到别的版块会自动取消当前拨号；入口卡片内切换（含展开/收起）不打断拨号。
+// 旧式功能页名继续兼容：send/receive/chat 归到 WebRTC 对应状态，friends 归到 WebRTC
+// 并保留当前状态（好友列表已常驻版块下方）。
+function switchTab(tab, sub) {
+  let subTarget = sub || null;
+  if (tab === 'send' || tab === 'receive' || tab === 'chat') {
+    subTarget = tab;
+    tab = 'webrtc';
+  } else if (tab === 'friends') {
+    tab = 'webrtc';
+  }
+
   currentTab = tab;
   activateMode(tab);
   document.querySelectorAll('#mainTabs .seg-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
+  if (tab === 'webrtc') setWebRTCSub(subTarget || webrtcSub);
   if (tab === 'localsend') renderLocalsendList();
-  if (tab === 'chat') {
+}
+
+// 展开面板的"逐项淡入"元素：面板白卡的直接子元素（隐藏的备用步骤跳过）
+function entryFadeItems(slot) {
+  const card = slot.querySelector ? slot.querySelector('.panel-card') : null;
+  const host = card || slot;
+  return Array.from(host.children || []).filter(el => !el.classList.contains('hidden'));
+}
+
+// requestAnimationFrame 包装（保证事件落实前页面已准备好过渡）
+const ENTRY_RAF = typeof requestAnimationFrame === 'function'
+  ? fn => requestAnimationFrame(fn)
+  : fn => setTimeout(fn, 16);
+
+// 展开槽位：加 .open（grid 0fr→1fr 由 CSS 过渡）；内容块自上而下加序号延迟逐项淡入。
+// 显隐不依赖 JS 定时器（收起后的隐藏由 CSS visibility 延迟完成），预算好初始态再切换类。
+// __slotToken 防抖：快速连点/展开收起交错时，旧动画的回调全部作废。
+function openEntrySlot(slot) {
+  const token = slot.__slotToken = (slot.__slotToken || 0) + 1;
+  slot.__opened = true;
+  slot.classList.add('open');
+  const items = entryFadeItems(slot);
+  items.forEach((el, i) => {
+    el.classList.add('entry-item-hidden');
+    el.style.transitionDelay = Math.min(i * 80, 400) + 'ms';
+  });
+  void slot.offsetHeight; // 强制一次样式计算，先落位初始隐藏态（opacity 0）再开始过渡
+  ENTRY_RAF(() => {
+    if (slot.__slotToken !== token) return;
+    items.forEach(el => el.classList.remove('entry-item-hidden'));
+    // 淡入完成后清掉序号延迟，避免影响面板后续的显隐切换
+    setTimeout(() => { if (slot.__slotToken === token) items.forEach(el => { el.style.transitionDelay = ''; }); }, 750);
+  });
+}
+
+// 收起槽位：去 .open，grid 1fr→0fr 收起高度；焦点隔离交给 CSS visibility 延迟，
+// 因此这里只切类——真实浏览器立即开始收起动画，测试环境也保持同一语义。
+function closeEntrySlot(slot) {
+  const token = slot.__slotToken = (slot.__slotToken || 0) + 1;
+  slot.__opened = false;
+  slot.classList.remove('open');
+}
+
+// WebRTC 版块状态：none=入口卡片收起（默认） / send / receive / chat。
+// data-open 驱动 entryZone 的 CSS（卡片玻璃背景/内衬 + 按钮合并显隐），
+// 槽位高度+淡入动画由 openEntrySlot/closeEntrySlot 执行；切到 chat 打开聊天页并清未读。
+function setWebRTCSub(sub) {
+  if (sub !== 'send' && sub !== 'receive' && sub !== 'chat' && sub !== 'none') sub = 'none';
+  webrtcSub = sub;
+  if (sub !== 'chat') lastHomeSub = sub; // 记录离开聊天页前所在的入口状态
+
+  const zone = document.getElementById('entryZone');
+  if (zone) zone.dataset.open = sub;
+
+  ['send', 'receive', 'chat'].forEach(t => {
+    const slot = document.getElementById('webrtcSub' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (!slot) return;
+    if (sub === t) {
+      if (!slot.__opened) openEntrySlot(slot);
+    } else if (slot.__opened) {
+      closeEntrySlot(slot);
+    }
+  });
+
+  if (sub === 'chat') {
     const s = getActiveSession();
     if (s) s.unread = 0;
     renderChat(true);
@@ -2823,13 +2979,24 @@ function switchTab(tab) {
   }
 }
 
+function onWebRTCSubClick(sub) {
+  // 再点一次当前展开的按钮 = 收起卡片回到首页；入口内切换不打断正在进行的拨号
+  setWebRTCSub(webrtcSub === sub ? 'none' : sub);
+}
+
+// 聊天页"返回首页"：回到离开前的入口状态（从未选过则为收起的首页）
+function backToEntryZone() {
+  setWebRTCSub(lastHomeSub || 'none');
+}
+
 function onTabClick(tab) {
-  // 拨号中切换标签：自动取消当前拨号，不再把用户锁在等待页面
-  if (tab !== currentTab && (dialActive || dialingFriend || dialingCode)) {
+  // 拨号中切到别的版块：自动取消当前拨号，不再把用户锁在等待页面
+  // （旧命名 send/receive/chat/friends 均归属 WebRTC 版块，不会视为"离开"）
+  const top = (tab === 'friends' || tab === 'send' || tab === 'receive' || tab === 'chat') ? 'webrtc' : tab;
+  if (top !== currentTab && (dialActive || dialingFriend || dialingCode)) {
     cancelDial();
   }
-  switchTab(tab);
-  if (tab === 'chat') renderChat(true);
+  switchTab(top);
 }
 
 function openHistory() {
@@ -2838,7 +3005,7 @@ function openHistory() {
 }
 
 function activateMode(tab) {
-  ['friends', 'send', 'receive', 'chat', 'history', 'localsend'].forEach(t => {
+  ['webrtc', 'localsend', 'history'].forEach(t => {
     const mode = document.getElementById(t + 'Mode');
     if (mode) mode.classList.toggle('hidden', t !== tab);
   });
@@ -2846,7 +3013,16 @@ function activateMode(tab) {
 
 function goHome() {
   if (dialActive || dialingFriend || dialingCode) cancelDial();
-  switchTab('friends');
+  switchTab('webrtc');
+}
+
+// "去好友列表连接"：切回 WebRTC 版块并滚动到下方的好友列表
+function focusWebrtcFriends() {
+  switchTab('webrtc');
+  const area = document.getElementById('webrtcFriendsArea');
+  if (area && typeof area.scrollIntoView === 'function') {
+    area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 // 聊天窗口：消息流统一渲染（文件+文本，发送靠右/接收靠左）
@@ -3467,9 +3643,12 @@ function hideDialBanner() {
 
 // 按 4 位设备码查找已有会话（同一设备重复连接时不再新建）；
 // 兼容带实例后缀的信令 ID（同源多标签页）
+// 注意：无连接的本地记录会话（virtual）不算真实链路——不能用它替掉
+// 拨号判断，也没有"半死"概念，一律跳过
 function findSessionByDeviceId(deviceId) {
   if (!deviceId) return null;
   for (const s of sessions.values()) {
+    if (s.virtual) continue;
     if (s.identity && s.identity.deviceId === deviceId) return s;
     const peerId = String(s.key || '');
     if (peerId === PEER_PREFIX_DEV + deviceId || peerId.startsWith(PEER_PREFIX_DEV + deviceId + '-')) return s;
@@ -3520,8 +3699,8 @@ function nextDialCandidate() {
 
 // 向单个候选信令 ID 发起设备直连（connectToFriend / dialDevice 共用尾部逻辑）
 function openCandidateConn(sid, deviceId, purpose, bannerText) {
-  // LocalSend / WebRTC 两种链路都会随连接元数据带给对端，
-  // 对端据此把这次会话归入对应“传输方式经历”，用于状态点颜色与默认选择
+  // transferMode 为旧版兼容字段：旧版对端仍会读取它维护“传输方式经历”；
+  // 新版两模块已互相隔离，本端不再读取该字段，仅为兼容旧对端保留
   const from = (dialingFriend && dialingFriend.from) || dialFrom || null;
   const transferMode = from === 'localsend' ? 'lan' : 'cross';
   const conn = devicePeer.connect(sid, {
@@ -3625,12 +3804,20 @@ function sessionAvatarColors(s) {
   return avatarColors[sum % avatarColors.length];
 }
 
+// 按任意文本（如昵称）哈希取头像配色：无固定配色记录的设备行用它染色
+function avatarColorsForText(text) {
+  const sum = Array.from(String(text || '?')).reduce((h, c) => h + c.charCodeAt(0), 0);
+  return avatarColors[sum % avatarColors.length];
+}
+
 function myAvatarColors() {
   const sum = Array.from(String(myDeviceName + myDeviceId)).reduce((h, c) => h + c.charCodeAt(0), 0);
   return avatarColors[sum % avatarColors.length];
 }
 
-// LocalSend 设备行：空闲时发起连接；连接中再次点击即取消
+// LocalSend 设备行（独立模块）：空闲时发起连接；连接中再次点击即取消。
+// 本版块只发现同网段设备，不存在好友分支；链路由统一拨号栈完成，
+// from='localsend' 仅表示连接期间停留在 LocalSend 版块（行内转圈）
 function onLocalsendRowClick(row) {
   if (localsendDialTarget === row.deviceId) { cancelDial(); return; }
   if (dialActive || dialingFriend || dialingCode) {
@@ -3647,16 +3834,7 @@ function onLocalsendRowClick(row) {
     }
     closeSession(existingSession);
   }
-  // 不在同一局域网：LocalSend 发现只是“看到对方”，实际链路统一走 WebRTC。
-  // 这里明确提示，并按 WebRTC 直连处理（跳转聊天窗口建立连接）
-  if (!row.lan) {
-    showToast('对方不在同一局域网，本次传输将通过 WebRTC 进行', 'info');
-    if (row.friendId) connectToFriend(row.friendId, null);
-    else dialDevice(row.deviceId, null);
-    return;
-  }
-  if (row.friendId) connectToFriend(row.friendId, 'localsend');
-  else dialDevice(row.deviceId, 'localsend');
+  dialDevice(row.deviceId, 'localsend');
 }
 
 // ==================== Setup Data Channel (multi-session) ====================
@@ -3701,6 +3879,17 @@ function createSession(conn, opts) {
   };
   sessions.set(s.key, s);
   restoreChatHistory(s); // 回填与该设备的历史聊天记录（刷新/重连后仍在）
+  // 同设备的本地记录会话「转正」：真实连接到了场，关闭离线只读窗口；
+  // 若用户正看着该窗口，把显示位无缝交给真实会话（被动接入也不打断）
+  const peerDevCode = deviceCodeFromPeerId(String(conn.peer));
+  if (peerDevCode) {
+    const virtualSame = findVirtualChatByCode(peerDevCode);
+    if (virtualSame) {
+      const wasViewing = activeSessionKey === virtualSame.key;
+      closeSession(virtualSame);
+      if (wasViewing && !s.isInitiator && !s.userConfirm) activeSessionKey = s.key;
+    }
+  }
   // 拨号状态复位：仅本端主动发起或用户确认过的会话才清理拨号横幅/状态；
   // 静默接受的入站会话（好友免确认直连）不抢走正在进行的拨号
   if (s.isInitiator || s.userConfirm) {
@@ -3729,7 +3918,7 @@ function createSession(conn, opts) {
       } else {
         s.unread++;
       }
-      if (currentTab === 'chat') renderChat(true);
+      if (chatPageVisible()) renderChat(true);
     }
     renderSessionChips();
     renderChat(true); // 强制刷新一次，确保头部状态与输入条立即随新连接置为可用
@@ -3737,7 +3926,7 @@ function createSession(conn, opts) {
     if (s.isInitiator || s.userConfirm) {
       showToast('已与 ' + name + ' 建立连接', 'success');
     } else {
-      showToast(name + ' 已与你建立连接，打开"会话"标签查看', 'info');
+      showToast(name + ' 已与你建立连接，点击上方"聊天"按钮查看', 'info');
     }
 
     // 握手：向对方交换真实设备身份（双向，双方都能把对方加为好友）
@@ -3977,12 +4166,10 @@ function onRemoteHello(msg, s) {
 
   // 会话在聊天页激活时才更新头部与消息流；chips 始终即时刷新
   renderSessionChips();
-  if (activeSessionKey === s.key && currentTab === 'chat') renderChat(true);
+  if (activeSessionKey === s.key && chatPageVisible()) renderChat(true);
 
-  // 记录这次会话用过的传输方式（LocalSend / WebRTC），
-  // 用于头像右下角状态点颜色与后续默认选择；这里 identity 已就绪
-  const meta = (s.conn && s.conn.metadata) || {};
-  markFriendTransferMode(deviceId, meta.transferMode || 'cross');
+  // 旧版会把入站元数据里的 transferMode 记入“传输方式经历”；
+  // 两模块隔离后本端不再读取或存储该信息
 
   if (existing) {
     // 已是好友，无需提示
@@ -4081,23 +4268,55 @@ function setupFileInput() {
     });
   }
 
-  // 聊天窗口整体作为拖放区
+  // 聊天窗口整体作为拖放区：连接正常 = 高亮提示可松手发送；
+  // 未连接（含离线记录视图）= 显示禁止符号，松手也不接收
   if (chatPanel) {
+    const chatIoReady = () => {
+      const s = getActiveSession();
+      return !!s && !!s.conn && !!s.conn.open && !s.closed;
+    };
+    const clearDragFeedback = () => {
+      chatPanel.classList.remove('dragover');
+      chatPanel.classList.remove('drag-forbidden');
+      const ov = document.getElementById('chatDragOverlay');
+      const dropHint = document.getElementById('chatDragDropHint');
+      const banHint = document.getElementById('chatDragBanHint');
+      if (ov) ov.classList.add('hidden');
+      if (dropHint) dropHint.classList.add('hidden');
+      if (banHint) banHint.classList.add('hidden');
+    };
     ['dragenter', 'dragover'].forEach(eventName => {
       chatPanel.addEventListener(eventName, (e) => {
         e.preventDefault();
-        chatPanel.classList.add('dragover');
+        const ready = chatIoReady();
+        chatPanel.classList.toggle('dragover', ready);
+        chatPanel.classList.toggle('drag-forbidden', !ready);
+        // dropEffect=none 让浏览器同时显示系统级「不可放」光标
+        if (e.dataTransfer && !ready) e.dataTransfer.dropEffect = 'none';
+        const ov = document.getElementById('chatDragOverlay');
+        if (ov) {
+          ov.classList.remove('hidden');
+          const dropHint = document.getElementById('chatDragDropHint');
+          const banHint = document.getElementById('chatDragBanHint');
+          if (dropHint) dropHint.classList.toggle('hidden', !ready);
+          if (banHint) banHint.classList.toggle('hidden', ready);
+        }
       });
     });
     ['dragleave', 'drop'].forEach(eventName => {
       chatPanel.addEventListener(eventName, (e) => {
         e.preventDefault();
-        chatPanel.classList.remove('dragover');
+        clearDragFeedback();
       });
     });
     chatPanel.addEventListener('drop', (e) => {
       const dt = e.dataTransfer;
       if (!dt) return;
+      // 未连接一律拒收：禁止符号期间松手同样不进队列
+      if (!chatIoReady()) {
+        showToast('对方未连接，暂无法接收拖入的文件', 'warning');
+        return;
+      }
       // webkitGetAsEntry 必须在 drop 事件内同步调用，之后才能 await
       const entries = [];
       if (dt.items && dt.items.length) {
@@ -4157,7 +4376,12 @@ function collectDroppedEntries(entries) {
 function handleFiles(files) {
   const s = getActiveSession();
   if (!s) {
-    showToast('请先建立连接再发送文件（从好友列表或 LocalSend 发起）', 'warning');
+    showToast('请先建立连接再发送文件（可在好友列表发起连接）', 'warning');
+    return;
+  }
+  if (!s.conn || !s.conn.open) {
+    // 未连接（离线记录视图 / 连接未就绪）：不悄悄排队，直接拒收并说明
+    showToast('对方未连接，暂无法发送文件', 'warning');
     return;
   }
   let skippedDirs = 0;
@@ -4335,7 +4559,11 @@ function createZipSource(entries, folderTitle) {
 function queueFolderBundle(pairs, folderTitle) {
   const s = getActiveSession();
   if (!s) {
-    showToast('请先建立连接再发送文件（从好友列表或 LocalSend 发起）', 'warning');
+    showToast('请先建立连接再发送文件（可在好友列表发起连接）', 'warning');
+    return;
+  }
+  if (!s.conn || !s.conn.open) {
+    showToast('对方未连接，暂无法发送文件', 'warning');
     return;
   }
   const enc = new TextEncoder();
@@ -4743,9 +4971,9 @@ function renderChat(force) {
   const si = document.getElementById('sendInterface');
   const s = getActiveSession();
 
-  const showWin = !!s && currentTab === 'chat';
+  const showWin = !!s && chatPageVisible();
   if (si) si.classList.toggle('hidden', !showWin);
-  if (noSession) noSession.classList.toggle('hidden', !(!s && currentTab === 'chat'));
+  if (noSession) noSession.classList.toggle('hidden', !(!s && chatPageVisible()));
   if (!s) {
     if (box) {
       const hint = document.getElementById('chatEmptyHint');
@@ -4759,8 +4987,15 @@ function renderChat(force) {
   if (!box) return;
   renderChatHeader(s);
   const hint = document.getElementById('chatEmptyHint');
+  const hintTxt = document.getElementById('chatEmptyHintText');
   const merged = chatMergedItems(s);
   if (hint) hint.classList.toggle('hidden', merged.length > 0);
+  // 空状态文案随窗口性质变化：离线只读窗口说明“暂无该设备的记录”
+  if (hintTxt) {
+    hintTxt.textContent = s.virtual
+      ? '本机没有与该设备的聊天记录，连接后开始传输'
+      : '连接已建立，拖入文件或发送消息开始传输';
+  }
 
   // 增量更新：仅新增/状态变化时重建对应节点；传输中只改进度条宽度与速率文本，布局保持稳定
   const anchorOffset = 1; // 空状态提示固定占第 0 位
@@ -4802,26 +5037,44 @@ function renderChatHeader(s) {
   if (!nameEl || !statusEl) return;
   if (!s) {
     nameEl.textContent = '未连接';
-    statusEl.textContent = '从好友列表或 LocalSend 发起连接';
+    statusEl.textContent = '从好友列表发起连接';
     statusEl.className = 'text-xs text-slate-400';
     updateChatInputState(null);
     return;
   }
   nameEl.textContent = sessionDisplayName(s);
   const online = !!s.conn && !!s.conn.open && !s.closed;
-  statusEl.textContent = online ? '已连接' : '未连接';
-  statusEl.className = online ? 'text-xs text-primary-500' : 'text-xs text-slate-400';
+  if (s.virtual) {
+    // 无连接的本地记录窗口：明示这是离线时打开的会话记录
+    statusEl.textContent = '仅查看记录（对方未连接）';
+    statusEl.className = 'text-xs text-slate-400';
+  } else {
+    statusEl.textContent = online ? '已连接' : '未连接';
+    statusEl.className = online ? 'text-xs text-primary-500' : 'text-xs text-slate-400';
+  }
   updateChatInputState(s);
 }
 
-// 输入条随连接状态置灰/恢复（图1：对方离线时输入框和发送都变灰不可点）
+// 输入条随连接状态置灰/恢复（图1：对方离线时输入框和发送都变灰不可点。
+// 文件/文件夹/剪贴板按钮同样置灰——离线时整个发送区域不可用，
+// 悬停提示同步说明原因；连接恢复后全部复原）
 function updateChatInputState(s) {
   const online = !!s && !!s.conn && !!s.conn.open && !s.closed;
   const bar = document.getElementById('chatInputBar');
   const input = document.getElementById('chatTextInput');
   const btn = document.getElementById('chatSendBtn');
+  const actionBtns = [
+    document.getElementById('chatAddFileBtn'),
+    document.getElementById('chatAddFolderBtn'),
+    document.getElementById('chatAddClipBtn')
+  ];
   if (input) input.disabled = !online;
   if (btn) btn.disabled = !online;
+  actionBtns.forEach(b => {
+    if (!b) return;
+    b.disabled = !online;
+    b.title = online ? (b.dataset.tip || b.title || '发送文件') : (b.dataset.tipOff || '对方未连接，无法发送');
+  });
   if (bar) bar.classList.toggle('opacity-60', !online);
 }
 
@@ -4842,7 +5095,7 @@ function renderSessionChips() {
       (active ? 'bg-primary-500 border-primary-500 text-white shadow-md' : 'glass border-slate-200 hover:bg-white text-slate-700');
     chip.onclick = () => {
       setActiveSession(s.key);
-      if (currentTab !== 'chat') switchTab('chat');
+      if (!chatPageVisible()) switchTab('chat');
       else renderChat(true);
       renderSessionChips();
     };
@@ -4850,7 +5103,7 @@ function renderSessionChips() {
       <span class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style="--avatar-color-1: ${colors[0]}; --avatar-color-2: ${colors[1]};">${esc((name || '?').charAt(0))}</span>
       <span class="text-xs font-medium truncate">${esc(name)}</span>
       ${s.unread > 0 ? '<span class="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center flex-shrink-0">' + (s.unread > 9 ? '9+' : s.unread) + '</span>' : ''}
-      <span data-session-close class="unset w-5 h-5 rounded-full hover:bg-red-500 hover:text-white flex items-center justify-center flex-shrink-0 text-xs ${active ? 'text-white/70' : 'text-slate-400'}" title="断开此连接">✕</span>
+      <span data-session-close class="unset w-5 h-5 rounded-full hover:bg-red-500 hover:text-white flex items-center justify-center flex-shrink-0 text-xs ${active ? 'text-white/70' : 'text-slate-400'}" title="${s.virtual ? '关闭记录窗口' : '断开此连接'}">✕</span>
     `;
     const closeBtn = chip.querySelector('[data-session-close]');
     if (closeBtn) closeBtn.onclick = (e) => {
@@ -4859,10 +5112,13 @@ function renderSessionChips() {
     };
     box.appendChild(chip);
   });
+  // 无会话时同步隐藏首页的"聊天"入口按钮（有会话才出现在两枚渐变按钮下方）
+  const entryChatBtn = document.getElementById('entryBtnChat');
+  if (entryChatBtn) entryChatBtn.classList.toggle('hidden', list.length === 0);
   updateChatTabBadge();
 }
 
-// 聊天 tab 上的未读总数徽标
+// 聊天子标签上的未读总数徽标
 function updateChatTabBadge() {
   const badge = document.getElementById('chatTabBadge');
   if (!badge) return;
@@ -4993,9 +5249,14 @@ function waitForDrain(s, frameCount) {
   });
 }
 
+// 聊天子页此刻是否真的显示在屏幕上（顶栏在 WebRTC 且子页为"聊天"）
+function chatPageVisible() {
+  return currentTab === 'webrtc' && webrtcSub === 'chat';
+}
+
 // 发送到"当前不在看"的会话 → 未读计数 + tab 徽标
 function isChatNotViewed(s) {
-  return s.key !== activeSessionKey || currentTab !== 'chat';
+  return s.key !== activeSessionKey || !chatPageVisible();
 }
 
 // ==================== Send Text ====================
@@ -5300,15 +5561,16 @@ function showReceivedText(s, content, label) {
 }
 
 // ==================== Connection Management ====================
-// 断开当前展示的会话
+// 断开当前展示的会话（本地记录窗口则为关闭窗口）
 function disconnect() {
   const s = getActiveSession();
   if (!s) {
     showToast('当前没有活动连接', 'info');
     return;
   }
+  const isVirtual = !!s.virtual;
   closeSession(s);
-  showToast('已断开连接', 'info');
+  showToast(isVirtual ? '已关闭该会话的记录窗口' : '已断开连接', 'info');
 }
 
 // 关闭单个会话：清理传输心跳、切到剩余会话、复位聊天窗口；不影响其他会话
@@ -5334,7 +5596,7 @@ function closeSession(s) {
     closeCodeSession();
   }
   renderSessionChips();
-  if (currentTab === 'chat') renderChat(true);
+  if (chatPageVisible()) renderChat(true);
 }
 
 // 会话健康判定（应用层心跳）：DataChannel 没有 keepalive，对端消失后本端
@@ -5364,7 +5626,7 @@ function giveWakeGrace() {
 function sessionHealthTick() {
   const now = Date.now();
   sessions.forEach(s => {
-    if (s.closed) return;
+    if (s.closed || s.virtual) return;
     if (!s.conn || !s.conn.open) {
       // 通道尚未打开：拨号/入站握手最多 25s，ICE 慢协商再宽限一截
       if (now - (s.created || 0) > SESSION_HANDSHAKE_GRACE_MS) {
@@ -5670,6 +5932,26 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
+// ==================== 主页模块挂载 ====================
+// send/receive/chat 三个面板移入 WebRTC 版块的入口卡片槽位（聊天经其内部挂载点，与
+// 返回按钮同层），好友列表常驻卡片下方；historyMode / localsendMode 移入标签内容区
+// （与 WebRTC 版块平级）。被移入的面板自带 hidden 样式，挂载后解除——可见性与展开
+// 动画改由 槽位 + setWebRTCSub 控制。
+function mountHomeModules() {
+  const tabContent = document.getElementById('tabContent');
+  ['historyMode', 'localsendMode'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && tabContent && el.parentElement !== tabContent) tabContent.appendChild(el);
+  });
+  [['sendMode', 'webrtcSubSend'], ['receiveMode', 'webrtcSubReceive'], ['chatMode', 'chatMount'], ['friendsMode', 'webrtcFriendsArea']].forEach(([id, slotId]) => {
+    const el = document.getElementById(id);
+    const slot = slotId && document.getElementById(slotId);
+    if (el && slot && el.parentElement !== slot) slot.appendChild(el);
+    el.classList.remove('hidden'); // 面板可见性交给槽位动画，本层不再隐藏
+  });
+  switchTab('webrtc');
+}
+
 // ==================== Initialize ====================
 document.addEventListener('DOMContentLoaded', async () => {
   ensureIdentity();
@@ -5680,13 +5962,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fy = document.getElementById('footerYear');
   if (fy) fy.textContent = String(new Date().getFullYear());
   await loadHistory();
-  // 功能视图常驻主页内容区，分段标签切换显示；默认落在好友列表
-  const tabContent = document.getElementById('tabContent');
-  ['friendsMode', 'sendMode', 'receiveMode', 'chatMode', 'historyMode', 'localsendMode'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) tabContent.appendChild(el);
-  });
-  switchTab('friends');
+  // 功能视图常驻主页：historyMode / localsendMode 移入标签内容区；
+  // send/receive/chat 面板与好友列表移入入口卡片/常驻区。默认落在 WebRTC 首页（入口卡片收起）
+  mountHomeModules();
   updateHomeInfo();
   updateUserStatus();
   window.addEventListener('online', updateHomeInfo);
@@ -5714,8 +5992,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderLocalsendList();
       refreshLanStatus();
     }
-    const fMode = document.getElementById('friendsMode');
-    if (fMode && !fMode.classList.contains('hidden')) {
+    // WebRTC 版块可见时（好友列表常驻其中），刷新好友在线状态
+    const wMode = document.getElementById('webrtcMode');
+    if (wMode && !wMode.classList.contains('hidden')) {
       updateFriendOnlineIndicators();
     }
   }, 5000);
