@@ -6176,6 +6176,13 @@ function showInterruptCard(entries, subtext) {
   const reconnectTargets = [];
   const seenDevices = new Set();
   entries.forEach(e => { if (e.deviceId && e.restored && !seenDevices.has(e.deviceId)) { seenDevices.add(e.deviceId); reconnectTargets.push(e); } });
+  // 网络门控：设备无网时「重新发送/重新连接」点了也拨不出去（飞行模式中断
+  // 的典型瞬间），先隐藏并显示等待恢复提示；卡片开着期间监听 online/offline，
+  // 网络一回来自动把按钮补上
+  const netUp = (() => { try { return navigator.onLine !== false; } catch (e) { return true; } })();
+  const netDep = !!(targets.length || reconnectTargets.length);
+  const netHintText = targets.length && reconnectTargets.length ? '网络恢复后即可重新发送或重连对方'
+    : targets.length ? '网络恢复后即可重新发送' : '网络恢复后即可重新连接对方';
   const html = `
     <div class="text-center mb-5">
       <div class="w-16 h-16 rounded-2xl bg-yellow-500/15 flex items-center justify-center mx-auto mb-4">
@@ -6187,15 +6194,17 @@ function showInterruptCard(entries, subtext) {
     <div class="space-y-2 mb-5">${rows}</div>
     <div class="space-y-3">
       ${targets.length ? `
-      <button id="interruptResendBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+      <button id="interruptResendBtn" style="display:${netUp ? '' : 'none'};" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
         <i class="fas fa-rotate-right"></i>
         重新发送
       </button>` : ''}
       ${reconnectTargets.length ? `
-      <button id="interruptReconnectBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+      <button id="interruptReconnectBtn" style="display:${netUp ? '' : 'none'};" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
         <i class="fas fa-link"></i>
         重新连接对方
       </button>` : ''}
+      ${netDep ? `
+      <div id="interruptOfflineHint" class="text-xs text-slate-400 flex items-center justify-center gap-2 ${netUp ? 'hidden' : ''}"><i class="fas fa-wifi"></i><span>${netHintText}</span></div>` : ''}
       <button id="interruptOkBtn" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
         <i class="fas fa-check"></i>
         知道了
@@ -6223,6 +6232,27 @@ function showInterruptCard(entries, subtext) {
       dialDevice(e.deviceId).catch(() => { /* 失败提示由拨号栈负责 */ });
     });
   };
+  // 网络恢复补按钮：监听 online/offline；卡片已关（元素不在 DOM）时自清理，
+  // 不留常驻监听
+  if (netDep) {
+    const applyNetGate = () => {
+      let up = true;
+      try { up = navigator.onLine !== false; } catch (e) { /* 保持默认 */ }
+      const rbtn = document.getElementById('interruptResendBtn');
+      const cbtn = document.getElementById('interruptReconnectBtn');
+      if ((!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected)) {
+        window.removeEventListener('online', applyNetGate);
+        window.removeEventListener('offline', applyNetGate);
+        return;
+      }
+      if (rbtn) rbtn.style.display = up ? '' : 'none';
+      if (cbtn) cbtn.style.display = up ? '' : 'none';
+      const hintEl = document.getElementById('interruptOfflineHint');
+      if (hintEl) hintEl.classList.toggle('hidden', up);
+    };
+    window.addEventListener('online', applyNetGate);
+    window.addEventListener('offline', applyNetGate);
+  }
 }
 
 // 「重新发送」= 登记重发任务 + 立即按现有拨号栈重连（好友免确认；陌生设备
