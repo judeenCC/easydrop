@@ -2567,6 +2567,8 @@ document.addEventListener('visibilitychange', () => {
     sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
     wakeLockSync(); // 锁在切后台时被系统释放：回前台若传输仍在进行，重新申请
     checkWakeInterrupted(); // 连接已死且传输未完成 → 明确提示（中断卡片 + 重发入口）
+  } else {
+    writeInterruptMarker(); // 切后台瞬间快照在途传输：防页面被系统丢弃后无据可查
   }
 });
 
@@ -5984,6 +5986,7 @@ function snapshotInterrupted(s) {
   if (rec.surfaceShown) rec.surfaceShown = !holdForWake && !immediateMobile;
 
   if (immediateMobile) flushInterruptRecords();
+  persistInterruptRecords(); // 落盘：页面若被系统丢弃（Android 后台回收），重载后仍能补弹
 }
 
 // 把已登记的中断记录弹成卡片（一次性消费）：回前台补弹入口；弹出即清，
@@ -5993,7 +5996,91 @@ function flushInterruptRecords() {
   const toShow = [];
   pendingInterruptRecords.forEach(rec => { if (!rec.surfaceShown) toShow.push(...rec.entries); });
   pendingInterruptRecords.clear(); // 弹过或已通知的记录即清，禁止常驻
+  persistInterruptRecords();       // 同步落盘（此时待弹为空 → 移除）
   if (toShow.length) showInterruptCard(toShow);
+}
+
+// ==================== 跨页面生命周期落盘（Android 后台丢弃兜底） ====================
+// Android Chrome 可能在后台把标签页直接丢弃（内存压力）：冻结期间排队的
+// close 事件全部蒸发，closeSession 无从执行，任何内存态都救不回来。因此：
+//  - 登记中断时把待弹记录落到 localStorage（权威记录，TTL 内重载后补弹）
+//  - 切后台瞬间若有传输在途，另落一份「待判」标记（closeSession 没跑成时的
+//    兜底）：重载后据此弹「可能中断」提示。回前台判明结局（续传/已收场）即清除
+const INTERRUPT_PENDING_KEY = 'easydrop.pendingInterrupt';
+const INTERRUPT_MARKER_KEY = 'easydrop.interruptMarker';
+
+// sendItems 持有 File/内存引用不能落盘；重载后文件句柄必失，卡片只能提示重选，
+// 不再提供「重新发送」（restored 标记让 showInterruptCard 跳过该按钮）
+function stripEntriesForStore(entries) {
+  return entries.map(e => ({ isSend: e.isSend, deviceId: e.deviceId, peerName: e.peerName, name: e.name, detail: e.detail, restored: true }));
+}
+
+function persistInterruptRecords() {
+  try {
+    const recs = [];
+    pendingInterruptRecords.forEach((rec, key) => {
+      if (!rec.surfaceShown) recs.push({ key, at: rec.at, entries: stripEntriesForStore(rec.entries) });
+    });
+    if (recs.length) {
+      localStorage.setItem(INTERRUPT_PENDING_KEY, JSON.stringify(recs));
+      localStorage.removeItem(INTERRUPT_MARKER_KEY); // 权威登记已存在，待判标记作废
+    } else {
+      localStorage.removeItem(INTERRUPT_PENDING_KEY);
+    }
+  } catch (e) { /* 存储异常静默：补弹不是关键路径 */ }
+}
+
+// 切后台瞬间：把所有在途传输快照成「待判」标记（visibilitychange → hidden 调用）
+function writeInterruptMarker() {
+  try {
+    const entries = [];
+    sessions.forEach(s => {
+      if (!s || s.closed || s.virtual) return;
+      if (!s.currentTransfer && !s.currentReceive) return;
+      entries.push(...interruptEntriesFromSession(s, s.currentReceive, s.currentTransfer));
+    });
+    if (entries.length) localStorage.setItem(INTERRUPT_MARKER_KEY, JSON.stringify({ at: Date.now(), entries: stripEntriesForStore(entries) }));
+    else localStorage.removeItem(INTERRUPT_MARKER_KEY);
+  } catch (e) { /* 同上，静默 */ }
+}
+
+function clearInterruptMarker() {
+  try { localStorage.removeItem(INTERRUPT_MARKER_KEY); } catch (e) { /* 静默 */ }
+}
+
+// 回前台：标记所覆盖的不确定性已由本页判明（续传/收场出卡）→ 清除；
+// limbo（6s 复核未决）时保留，由复核回调了断
+function clearInterruptMarkerIfResolved() {
+  let marker = null;
+  try { marker = JSON.parse(localStorage.getItem(INTERRUPT_MARKER_KEY) || 'null'); } catch (e) { marker = null; }
+  if (!marker) return;
+  let limbo = false;
+  sessions.forEach(s => {
+    if (!s || s.closed || s.virtual) return;
+    if (!s.currentTransfer && !s.currentReceive) return;
+    if (!s.conn || !s.conn.open) return; // 硬死：checkWakeInterrupted 上方已 finish 收场
+    if (Date.now() - (s.lastPong || 0) > SESSION_PONG_STALE_MS + 30000) limbo = true;
+  });
+  if (limbo) return;
+  clearInterruptMarker();
+}
+
+// 页面加载：上一世被系统丢弃时的中断记录/待判标记 → 补弹卡片（一次性消费）
+function restoreInterruptRecordsOnLoad() {
+  let pending = null, marker = null;
+  try {
+    pending = JSON.parse(localStorage.getItem(INTERRUPT_PENDING_KEY) || 'null');
+    marker = JSON.parse(localStorage.getItem(INTERRUPT_MARKER_KEY) || 'null');
+  } catch (e) { pending = marker = null; }
+  try { localStorage.removeItem(INTERRUPT_PENDING_KEY); } catch (e) { /* 静默 */ }
+  try { localStorage.removeItem(INTERRUPT_MARKER_KEY); } catch (e) { /* 静默 */ }
+  const now = Date.now();
+  const entries = [];
+  (pending || []).forEach(rec => { if (now - (rec.at || 0) <= INTERRUPT_RESEND_TTL_MS) entries.push(...(rec.entries || [])); });
+  if (!entries.length && marker && now - (marker.at || 0) <= INTERRUPT_RESEND_TTL_MS) entries.push(...(marker.entries || []));
+  if (!entries.length) return;
+  console.log('[interrupt] 页面重载恢复中断记录（上一页面被系统回收）: ' + entries.map(e => e.name).join(', '));
+  showInterruptCard(entries, '上一页面被系统回收导致传输中断<br>文件需要重新选择后发送（文件句柄不跨页面保留）');
 }
 
 // 回前台断连检查（在 visibilitychange → visible 时调用）
@@ -6013,13 +6100,15 @@ function checkWakeInterrupted() {
       s.__wakeVerifyTimer = setTimeout(() => {
         s.__wakeVerifyTimer = null;
         if (s.closed || (!s.currentTransfer && !s.currentReceive)) return;
-        if (isSessionAlive(s)) return; // 复活了：照常继续，不弹卡
+        if (isSessionAlive(s)) { clearInterruptMarker(); return; } // 复活了：照常继续，不弹卡
         finishInterruptedSession(s);
       }, 6000);
     }
   });
   // 冻结期间（或此后任意时刻）closeSession 已登记的中断记录 → 在这里统一补弹
   flushInterruptRecords();
+  // 切后台时的「待判」标记：此刻本页已能判明结局（续传/收场出卡）→ 解除
+  clearInterruptMarkerIfResolved();
 }
 
 // 会话对象在中断收尾关闭会话前收集断传信息（内存 item、队列余量、对端身份）
@@ -6034,11 +6123,15 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
       detail: '已接收 ' + formatFileSize(midReceive.receivedBytes || 0) + ' / ' + formatFileSize(midReceive.size || 0) + '，传输未完成'
     });
   }
-  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending');
+  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing');
+  // 活尸/硬死检查路径在 closeSession 打 failed 标记之前收集：正在发送中的
+  // 条目也必须算进来，否则「单文件传到一半」的会话收集结果为空 → 无卡无记录
+  if (midSend && !sendItems.includes(midSend)) sendItems.unshift(midSend);
   if (sendItems.length) {
     const first = sendItems[0];
     const failedCount = sendItems.filter(i => i.status === 'failed').length;
-    const pendingCount = sendItems.length - failedCount;
+    // 正在发送中的条目就是「已发送 X / Y」的主角，不重复计入待发
+    const pendingCount = sendItems.length - failedCount - (midSend && midSend.status === 'sending' ? 1 : 0);
     entries.push({
       isSend: true, deviceId, peerName, sendItems,
       name: midSend ? midSend.name : (first.name || '未命名文件'),
@@ -6050,21 +6143,26 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
   return entries;
 }
 
-// 单个死亡/疑似死亡会话的收尾（checkWakeInterrupted 活尸路径）：此路径由本
-// 函数直接弹卡（回前台瞬间用户注意力就在屏上）；先打 __interruptHandled
-// 标记，让 closeSession 的 snapshot 漏斗跳过登记，避免同一次中断双卡
+// 单个死亡/疑似死亡会话的收尾（checkWakeInterrupted 活尸/硬死路径）：此路径
+// 由本函数直接弹卡（回前台瞬间用户注意力就在屏上）。先打 __interruptHandled
+// 标记让 closeSession 的 snapshot 漏斗跳过登记（防双卡），并在 closeSession
+// 把传输中条目标 failed **之后**再收集条目——否则 sending 态条目滤网抓不到，
+// 单文件会话会收集出空条目（无卡无记录，实测场景 1 的症状）
 function finishInterruptedSession(s) {
   if (!s || s.closed) return;
   const midReceive = s.currentReceive;
   const midSend = s.currentTransfer;
-  const entries = interruptEntriesFromSession(s, midReceive, midSend);
   s.__interruptHandled = true;
-  closeSession(s); // 内部会把传输中条目标记为 failed，供下方重发集合拾取
+  closeSession(s); // 内部会把传输中条目标记为 failed，供下方收集拾取
+  const entries = interruptEntriesFromSession(s, midReceive, midSend);
+  clearInterruptMarker(); // 本次中断已出正式卡片，切后台时的「待判」标记作废
   if (entries.length) showInterruptCard(entries);
 }
 
-// 「传输中断」卡片：复用选择弹窗壳（Esc/背板/× 均可关闭，与站内弹窗一致）
-function showInterruptCard(entries) {
+// 「传输中断」卡片：复用选择弹窗壳（Esc/背板/× 均可关闭，与站内弹窗一致）。
+// subtext 可覆盖副标题（页面重载恢复场景说明文件需重选）；restored 条目没有
+// 文件句柄，不提供「重新发送」按钮
+function showInterruptCard(entries, subtext) {
   const rows = entries.map(e => `
     <div class="text-left bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
       <div class="font-medium text-slate-800 mb-1 truncate">
@@ -6073,14 +6171,14 @@ function showInterruptCard(entries) {
       <div class="text-xs text-slate-400">${esc(e.detail)}${(entries.length > 1 && e.peerName) ? ' · ' + esc(e.peerName) : ''}</div>
     </div>`).join('');
   const targets = [];
-  entries.forEach(e => { if (e.isSend && e.deviceId) targets.push(e); });
+  entries.forEach(e => { if (e.isSend && e.deviceId && !e.restored) targets.push(e); });
   const html = `
     <div class="text-center mb-5">
       <div class="w-16 h-16 rounded-2xl bg-yellow-500/15 flex items-center justify-center mx-auto mb-4">
         <i class="fas fa-triangle-exclamation text-2xl text-yellow-500"></i>
       </div>
       <h4 class="font-semibold text-slate-800 mb-2">传输中断</h4>
-      <p class="text-sm text-slate-400">连接断开，文件传输未完成<br>（锁屏/熄屏或切后台导致的断连是网页版已知硬限制）</p>
+      <p class="text-sm text-slate-400">${subtext || '连接断开，文件传输未完成<br>（锁屏/熄屏或切后台导致的断连是网页版已知硬限制）'}</p>
     </div>
     <div class="space-y-2 mb-5">${rows}</div>
     <div class="space-y-3">
@@ -6136,12 +6234,15 @@ function pruneInterruptResendJobs() {
   });
   // 中断卡片登记同走 TTL：正常寿命是「回前台补弹」或「下一次 flush」，
   // 但若页面长挂前台不触发 flush，也不允许常驻累积
+  let pendingPruned = false;
   pendingInterruptRecords.forEach((rec, key) => {
     if (now - rec.at > INTERRUPT_RESEND_TTL_MS) {
       pendingInterruptRecords.delete(key);
+      pendingPruned = true;
       console.log('[interrupt] 中断卡片登记已过期清理:', key);
     }
   });
+  if (pendingPruned) persistInterruptRecords(); // 落盘同步（过期记录同时移出 localStorage）
 }
 
 // ==================== Connection Management ====================
@@ -6586,6 +6687,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
   initializePeer();
+  restoreInterruptRecordsOnLoad(); // 上一世被系统丢弃的中断记录/待判标记 → 补弹卡片
   fetchTurnCreds(); // TURN 凭证后台预拉（选型 A）：失败静默降级纯 STUN，绝不阻塞
   renderDeviceAddress();
   updateLanIpDisplay().then(() => initLanDiscovery());
