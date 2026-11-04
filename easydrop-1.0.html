@@ -2566,6 +2566,7 @@ document.addEventListener('visibilitychange', () => {
     initPresenceBeacon();
     sessionHealthTick(); // 回前台时跑健康巡检（后台期间网络可能切换过）
     wakeLockSync(); // 锁在切后台时被系统释放：回前台若传输仍在进行，重新申请
+    checkWakeInterrupted(); // 连接已死且传输未完成 → 明确提示（中断卡片 + 重发入口）
   }
 });
 
@@ -4305,6 +4306,26 @@ function onRemoteHello(msg, s) {
     }
   }
 
+  // 「传输中断」重发投递：用户点过重发后，对端任何路径重连回来（hello 到达）
+  // 即自动并入新会话继续发送；任务带 TTL，过期静默清理
+  const resendJob = interruptResendJobs.get(deviceId);
+  if (resendJob) {
+    interruptResendJobs.delete(deviceId);
+    if (Date.now() - resendJob.at <= INTERRUPT_RESEND_TTL_MS) {
+      resendJob.items.forEach(item => {
+        if (item.status === 'sending') return; // 防御
+        item.status = 'pending';
+        item.progress = 0;
+        item.sentBytes = 0;
+        item.samples = null;
+        item._lastRenderProgress = 0;
+        s.fileQueue.push(item);
+      });
+      if (s.conn && s.conn.open) processSendQueue(s);
+      showToast('连接已恢复，继续发送之前中断的文件', 'success');
+    }
+  }
+
   // 会话在聊天页激活时才更新头部与消息流；chips 始终即时刷新
   renderSessionChips();
   if (activeSessionKey === s.key && chatPageVisible()) renderChat(true);
@@ -5901,6 +5922,141 @@ function wakeLockSync() {
   }
 }
 
+// ==================== 回前台断连恢复（「传输中断」卡片 + 重发） ====================
+// 后台/锁屏期间对端可能已被系统回收，而本端页面被冻结时收不到 close 事件：
+// 回前台后表现为「进度条永远不走」的静默卡死。回前台时做一次断连检查并给
+// 出明确行动项。判据从严（通道已关闭 / 心跳深度失联），常规网络抖动仍交给
+// 现有健康巡检 + 唤醒宽限，不在这里抢判。手动按电源键锁屏导致的断连是网页
+// 版已知硬限制，无需也无法绕过——卡片文案向用户说明，并给出「重新发送」。
+const interruptResendJobs = new Map();  // key: 对端 deviceId → { items, at }
+const INTERRUPT_RESEND_TTL_MS = 10 * 60 * 1000; // 重发任务有效期：超期不再续发、立即出表
+
+// 回前台断连检查（在 visibilitychange → visible 时调用）
+function checkWakeInterrupted() {
+  sessions.forEach(s => {
+    if (!s || s.closed || s.virtual) return;
+    if (!s.currentTransfer && !s.currentReceive) return;
+    // 硬死：数据通道已关闭，给不出任何借口
+    if (!s.conn || !s.conn.open) { finishInterruptedSession(s); return; }
+    // 通道「开着」但心跳深度失联（远超唤醒宽限应有的新鲜度）：大概率对端已
+    // 死且冻结期收不到 close。延迟 6s 复核一次，留给短抖动/对端解冻最后机会
+    if (Date.now() - (s.lastPong || 0) > SESSION_PONG_STALE_MS + 30000 && !s.__wakeVerifyTimer) {
+      s.__wakeVerifyTimer = setTimeout(() => {
+        s.__wakeVerifyTimer = null;
+        if (s.closed || (!s.currentTransfer && !s.currentReceive)) return;
+        if (isSessionAlive(s)) return; // 复活了：照常继续，不弹卡
+        finishInterruptedSession(s);
+      }, 6000);
+    }
+  });
+}
+
+// 单个死亡会话的中断收尾：收集信息 → closeSession（沿用既有 UI 清理/码界面
+// 复位）→ 弹「传输中断」卡片。不自动重拨：是否续发交由用户在卡片上决定
+function finishInterruptedSession(s) {
+  if (!s || s.closed) return;
+  const midReceive = s.currentReceive;
+  const midSend = s.currentTransfer;
+  const peerName = sessionDisplayName(s);
+  const deviceId = (s.identity && s.identity.deviceId) || '';
+  closeSession(s); // 内部会把传输中条目标记为 failed，供下方重发集合拾取
+  const entries = [];
+  if (midReceive) {
+    entries.push({
+      isSend: false, deviceId, peerName,
+      name: midReceive.name || '未命名文件',
+      detail: '已接收 ' + formatFileSize(midReceive.receivedBytes || 0) + ' / ' + formatFileSize(midReceive.size || 0) + '，传输未完成'
+    });
+  }
+  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending');
+  if (sendItems.length) {
+    const first = sendItems[0];
+    const failedCount = sendItems.filter(i => i.status === 'failed').length;
+    const pendingCount = sendItems.length - failedCount;
+    entries.push({
+      isSend: true, deviceId, peerName, sendItems,
+      name: midSend ? midSend.name : (first.name || '未命名文件'),
+      detail: '已发送 ' + formatFileSize((midSend ? midSend.sentBytes : 0) || 0) + ' / ' + formatFileSize(first.size || 0) +
+        (failedCount > 1 ? '（' + failedCount + ' 个文件）' : '') +
+        (pendingCount > 0 ? '；队列还有 ' + pendingCount + ' 个待发文件，将一并重发' : '')
+    });
+  }
+  if (entries.length) showInterruptCard(entries);
+}
+
+// 「传输中断」卡片：复用选择弹窗壳（Esc/背板/× 均可关闭，与站内弹窗一致）
+function showInterruptCard(entries) {
+  const rows = entries.map(e => `
+    <div class="text-left bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
+      <div class="font-medium text-slate-800 mb-1 truncate">
+        <i class="fas ${e.isSend ? 'fa-paper-plane text-primary-500' : 'fa-inbox text-cyan-500'} mr-2"></i>${esc(e.name)}
+      </div>
+      <div class="text-xs text-slate-400">${esc(e.detail)}${(entries.length > 1 && e.peerName) ? ' · ' + esc(e.peerName) : ''}</div>
+    </div>`).join('');
+  const targets = [];
+  entries.forEach(e => { if (e.isSend && e.deviceId) targets.push(e); });
+  const html = `
+    <div class="text-center mb-5">
+      <div class="w-16 h-16 rounded-2xl bg-yellow-500/15 flex items-center justify-center mx-auto mb-4">
+        <i class="fas fa-triangle-exclamation text-2xl text-yellow-500"></i>
+      </div>
+      <h4 class="font-semibold text-slate-800 mb-2">传输中断</h4>
+      <p class="text-sm text-slate-400">连接断开，文件传输未完成<br>（锁屏/熄屏或切后台导致的断连是网页版已知硬限制）</p>
+    </div>
+    <div class="space-y-2 mb-5">${rows}</div>
+    <div class="space-y-3">
+      ${targets.length ? `
+      <button id="interruptResendBtn" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-rotate-right"></i>
+        重新发送
+      </button>` : ''}
+      <button id="interruptOkBtn" class="w-full py-3 rounded-xl glass hover:bg-slate-100 text-slate-700 font-medium flex items-center justify-center gap-2">
+        <i class="fas fa-check"></i>
+        知道了
+      </button>
+    </div>`;
+  openChoiceModal('传输中断', html);
+  const okBtn = document.getElementById('interruptOkBtn');
+  if (okBtn) okBtn.onclick = closeChoiceModal;
+  const rsBtn = document.getElementById('interruptResendBtn');
+  if (rsBtn) rsBtn.onclick = () => {
+    closeChoiceModal();
+    targets.forEach(e => {
+      interruptResendJobs.set(e.deviceId, { items: e.sendItems, at: Date.now() });
+      resumeInterruptedSend(e.deviceId);
+    });
+  };
+}
+
+// 「重新发送」= 登记重发任务 + 立即按现有拨号栈重连（好友免确认；陌生设备
+// 仍由对方确认，连接语义不变）。重拨只是加速通道恢复：10 分钟有效期内对端
+// 任何路径重连回来（好友直连/连接码均可）都会经 hello 注入自动续发
+function resumeInterruptedSend(deviceId) {
+  if (!deviceId || !interruptResendJobs.has(deviceId)) return;
+  showToast('正在重新连接对方…', 'info');
+  dialDevice(deviceId).catch(() => { /* 失败提示由拨号栈负责；任务保留在表中 */ });
+  // 10 秒仍未连上：给出明确等待预期，而不是默默无反馈
+  setTimeout(() => {
+    if (dialActive || dialingFriend || dialingCode) return; // 还在拨：拨号横幅在跑
+    const cur = findSessionByDeviceId(deviceId);
+    if (cur && isSessionAlive(cur)) return; // 已连上，马上会经 hello 注入续发
+    if (!interruptResendJobs.has(deviceId)) return; // 已完成投递或已过期清理
+    showToast('等待对方上线：10 分钟内对方重新连接会自动续发', 'info');
+  }, 10000);
+}
+
+// 重发任务 TTL 清理（挂在 5s 健康巡检定时器上）：有效期内未投递即出表，
+// 禁止常驻累积
+function pruneInterruptResendJobs() {
+  const now = Date.now();
+  interruptResendJobs.forEach((job, key) => {
+    if (now - job.at > INTERRUPT_RESEND_TTL_MS) {
+      interruptResendJobs.delete(key);
+      console.log('[interrupt-resend] 重发任务已过期清理:', key);
+    }
+  });
+}
+
 // ==================== Connection Management ====================
 // 断开当前展示的会话（本地记录窗口则为关闭窗口）
 function disconnect() {
@@ -6343,6 +6499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // LocalSend 列表定期刷新：TTL 过期的设备离线消失，状态行的发现数同步
   setInterval(() => {
     sessionHealthTick(); // 应用层心跳：失联 40s 判死、握手 45s 未开清理
+    pruneInterruptResendJobs(); // 重发任务 TTL：有效期外立即出表，禁止常驻累积
     updateConnectionStatus();
     const mode = document.getElementById('localsendMode');
     if (mode && !mode.classList.contains('hidden')) {
