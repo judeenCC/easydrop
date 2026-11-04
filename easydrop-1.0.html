@@ -4994,6 +4994,10 @@ function buildChatItemEl(entry, s, animate) {
   const iconInfo = getFileIcon(item.name, item.type);
   const progress = item.progress || 0;
   const out = entry.dir === 'out';
+  // 对端在线判定（与心跳判死同口径）：离线时发出侧「重试/立即发送」点击
+  // 也送不出去 → 按钮换离线态。刚回前台的唤醒宽限期内照常按在线处理
+  // （pong 可能还没解冻刷新，别误报离线）
+  const peerOnline = out ? (isSessionAlive(s) || Date.now() < ((s && s.wakeGraceUntil) || 0)) : true;
   let statusText, statusColor, actionHtml, metaExtra = '';
   if (item.status === 'sending' || item.status === 'receiving') {
     const live = out ? liveTransferMeta(item, item.sentBytes || 0) : liveTransferMeta(item, item.receivedBytes || 0);
@@ -5016,18 +5020,32 @@ function buildChatItemEl(entry, s, animate) {
         ? `<span class="text-xs text-slate-300 flex-shrink-0 px-1" title="历史记录（文件本体未随记录保存）">历史</span>`
         : `<button type="button" data-dl="1" class="w-9 h-9 rounded-xl bg-accent-500/15 hover:bg-accent-500/25 flex items-center justify-center transition-all flex-shrink-0" title="下载"><i class="fas fa-download text-accent-500 text-sm"></i></button>`);
   } else if (item.status === 'failed') {
-    statusText = out ? '发送失败' : '接收失败';
-    statusColor = 'text-red-500';
-    actionHtml = out
-      ? `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`
-      : `<div class="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
+    if (out && !peerOnline) {
+      // 对端离线：重试点击也送不出去（且重开的记录窗口同样如此），改为
+      // 不可点的离线态；对端重连回来（onRemoteHello → renderChat）后自动恢复
+      statusText = '接收方连接已离线';
+      statusColor = 'text-slate-400';
+      actionHtml = `<div class="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0" title="接收方连接已离线，重新连接后可重试"><i class="fas fa-link-slash text-slate-300 text-sm"></i></div>`;
+    } else {
+      statusText = out ? '发送失败' : '接收失败';
+      statusColor = 'text-red-500';
+      actionHtml = out
+        ? `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-red-500/15 hover:bg-red-500/25 flex items-center justify-center transition-all flex-shrink-0" title="重试"><i class="fas fa-rotate-right text-red-500 text-sm"></i></button>`
+        : `<div class="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>`;
+    }
   } else if (item.status === 'packing') {
     statusText = '打包中...';
     statusColor = 'text-primary-500';
     actionHtml = `<div class="w-9 h-9 rounded-xl bg-primary-500/15 flex items-center justify-center flex-shrink-0"><i class="fas fa-hourglass-half text-primary-500 text-sm"></i></div>`;
   } else {
-    statusText = '排队中'; statusColor = 'text-slate-400';
-    actionHtml = `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="立即发送"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+    if (out && !peerOnline) {
+      statusText = '接收方连接已离线';
+      statusColor = 'text-slate-400';
+      actionHtml = `<div class="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0" title="接收方连接已离线，重新连接后自动发送"><i class="fas fa-link-slash text-slate-300 text-sm"></i></div>`;
+    } else {
+      statusText = '排队中'; statusColor = 'text-slate-400';
+      actionHtml = `<button type="button" data-retry="1" class="w-9 h-9 rounded-xl bg-primary-500/15 hover:bg-primary-500/25 flex items-center justify-center transition-all flex-shrink-0" title="立即发送"><i class="fas fa-paper-plane text-primary-500 text-sm"></i></button>`;
+    }
   }
 
   wrap.innerHTML = `
