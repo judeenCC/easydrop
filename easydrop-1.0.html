@@ -1123,6 +1123,10 @@ let dialingCode = false;
 let dialTimeout = null;
 let dialActive = false;          // 是否有进行中的拨号（随时可取消）
 let dialSeq = 0;                 // 拨号序号：取消或重新拨号后，旧的异步流程自动作废
+// 静默拨号静默窗：silent 拨号（自动重连/自动重发链路）发起时刷新。peer-unavailable
+// 错误事件可能晚于 failFriendDial 清场才到（届时 dialingFriend 已空、识别不到
+// silent），靠这个时间窗兜住，避免自动链路失败弹「对方不在线」刷屏
+let silentDialQuietUntil = 0;
 let pendingDialConn = null;      // 进行中的拨号连接，取消时关闭
 let dialFrom = null;             // 拨号来源：'localsend' 时显示行内转圈
 let localsendDialTarget = null;  // LocalSend 中正在拨号的设备 ID（用于行内转圈）
@@ -1830,7 +1834,10 @@ function closeFriendModal() {
 
 // 一键直连好友：直接拨对方稳定的设备 ID，无需再交换 6 位码。
 // 已建立会话则直接切换；多会话下可同时连多个好友。
-async function connectToFriend(friendId, from = null) {
+// opts.silent=true：自动重连链路调用——提示全部静默（同 dialDevice 的约定）
+async function connectToFriend(friendId, from = null, opts = null) {
+  const silent = !!(opts && opts.silent);
+  if (silent) silentDialQuietUntil = Date.now() + 30000;
   const friend = friends.find(f => f.id === friendId);
   if (!friend) return;
 
@@ -1839,28 +1846,30 @@ async function connectToFriend(friendId, from = null) {
   const existingSession = findSessionByDeviceId(friend.deviceId);
   if (existingSession) {
     // 半死会话（对端网络切换后 conn.open 仍 true 但心跳失联）：当场清掉重拨
+    // （程序化清场用 'cleanup'，不登记中断卡片）
     if (!isSessionAlive(existingSession)) {
-      closeSession(existingSession);
+      closeSession(existingSession, 'cleanup');
     } else {
       setActiveSession(existingSession.key);
-      switchTab('chat');
+      if (!silent) switchTab('chat');
       return;
     }
   }
   if (dialActive || dialingFriend || dialingCode) {
-    showToast('有连接请求正在处理，请先取消', 'warning');
+    if (!silent) showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
   if (!friend.deviceId) {
-    showToast('该好友缺少设备标识，无法直连，请通过新的连接码重新添加', 'warning');
+    if (!silent) showToast('该好友缺少设备标识，无法直连，请通过新的连接码重新添加', 'warning');
     return;
   }
   if (!devicePeer) {
     // W1：giveUp 终态/竞态后 devicePeer=null——旧版死 toast 直接 return，
     // 拨号从此瘫痪（唯一恢复路径 = 切后台触发 networkRecovery）。现在
     // 就地自愈：ensurePeerOpen 内部 initializePeer(true) 重建并等待 open。
-    showToast('正在恢复服务连接...', 'info');
+    if (!silent) showToast('正在恢复服务连接...', 'info');
     if (!(await ensurePeerOpen())) {
+      if (silent) { console.warn('[dial][silent] 自动重连放弃：连接服务未就绪', friend.deviceId); return; }
       showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
@@ -1874,22 +1883,23 @@ async function connectToFriend(friendId, from = null) {
     localsendDialTarget = friend.deviceId;
     renderLocalsendList();
   } else {
-    switchTab('chat');
-    showDialBanner(`正在连接 ${esc(friend.name)}，即将开始传输...`);
+    if (!silent) switchTab('chat'); // 自动链路不抢用户当前页
+    if (!silent) showDialBanner(`正在连接 ${esc(friend.name)}，即将开始传输...`);
   }
   if (!devicePeer.open) {
-    showToast('正在连接服务器，马上开始...', 'info');
+    if (!silent) showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
     if (seq !== dialSeq) return;
     if (!ok) {
       endDial();
       hideDialBanner();
+      if (silent) { console.warn('[dial][silent] 自动重连放弃：信令服务未就绪', friend.deviceId); return; }
       showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
   }
 
-  dialingFriend = { name: friend.name, deviceId: friend.deviceId, from };
+  dialingFriend = { name: friend.name, deviceId: friend.deviceId, from, silent }; // silent 供 failFriendDial 分流
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial(`连接 ${friend.name} 超时，对方可能不在线`), 20000);
 
@@ -1905,7 +1915,7 @@ async function connectToFriend(friendId, from = null) {
     dialingFriend = null;
     dialCandidates = [];
     hideDialBanner();
-    showToast('该好友的地址与本设备相同，无需连接', 'warning');
+    if (!silent) showToast('该好友的地址与本设备相同，无需连接', 'warning');
     return;
   }
   openCandidateConn(candidates[0], friend.deviceId, 'connect');
@@ -2843,29 +2853,36 @@ async function dialByAddress(purpose, inputId, from = null) {
 
 // 按稳定设备 ID 拨号；对方是陌生设备时会先弹确认，同意才真正握手。
 // 多会话下可与已有连接并存；对同一设备重复点击会话已存在时直接切到聊天。
-async function dialDevice(deviceId, from = null, purpose = 'connect') {
+// opts.silent=true：程序化自动链路（自动重连/中断自动重发）调用——全部
+// 提示（toast/横幅/切页）静默，失败仅 console.warn 留诊断线索；用户手动
+// 点击的拨号不传 silent，保留既有的一次点击一次明确提示
+async function dialDevice(deviceId, from = null, purpose = 'connect', opts = null) {
+  const silent = !!(opts && opts.silent);
+  if (silent) silentDialQuietUntil = Date.now() + 30000; // 覆盖晚到的 peer-unavailable 事件
   const existingSession = findSessionByDeviceId(deviceId);
   if (existingSession) {
-    // conn.open 可能仍为 true 但心跳已死：清掉占位，允许重拨
-    if (!isSessionAlive(existingSession)) closeSession(existingSession);
+    // conn.open 可能仍为 true 但心跳已死：清掉占位，允许重拨（程序化清场
+    // 不算中断，'cleanup' 不登记卡片，防自动重拨链路重复弹卡）
+    if (!isSessionAlive(existingSession)) closeSession(existingSession, 'cleanup');
     else {
       setActiveSession(existingSession.key);
-      switchTab('chat');
-      showToast('与该设备的连接已存在，已切换到聊天', 'info');
+      if (!silent) switchTab('chat');
+      if (!silent) showToast('与该设备的连接已存在，已切换到聊天', 'info');
       return;
     }
   }
   const busy = dialActive || dialingFriend || dialingCode;
   if (busy) {
-    showToast('有连接请求正在处理，请先取消', 'warning');
+    if (!silent) showToast('有连接请求正在处理，请先取消', 'warning');
     return;
   }
   if (!devicePeer) {
     // W1：giveUp 终态/竞态后 devicePeer=null——旧版死 toast 直接 return，
     // 拨号从此瘫痪（唯一恢复路径 = 切后台触发 networkRecovery）。现在
     // 就地自愈：ensurePeerOpen 内部 initializePeer(true) 重建并等待 open。
-    showToast('正在恢复服务连接...', 'info');
+    if (!silent) showToast('正在恢复服务连接...', 'info');
     if (!(await ensurePeerOpen())) {
+      if (silent) { console.warn('[dial][silent] 自动拨号放弃：连接服务未就绪', deviceId); return; }
       showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
@@ -2877,15 +2894,16 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
     localsendDialTarget = deviceId;
     renderLocalsendList();
   } else {
-    switchTab('chat');
+    if (!silent) switchTab('chat'); // 自动链路不抢用户当前页
   }
   if (!devicePeer.open) {
-    showToast('正在连接服务器，马上开始...', 'info');
+    if (!silent) showToast('正在连接服务器，马上开始...', 'info');
     const ok = await ensurePeerOpen();
     if (seq !== dialSeq) return;
     if (!ok) {
       endDial();
       hideDialBanner();
+      if (silent) { console.warn('[dial][silent] 自动拨号放弃：信令服务未就绪', deviceId); return; }
       showToast('连接服务未就绪，请稍后重试；若反复失败，切后台再返回一次即可自动恢复', 'error');
       return;
     }
@@ -2896,11 +2914,11 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
   const bannerText = isFriendTarget
     ? `正在连接 ${esc(friendTarget.name)}，即将开始传输...`
     : '正在请求连接对方设备，等待对方确认...';
-  dialingFriend = { name: friendTarget ? friendTarget.name : '对方设备', deviceId: deviceId, from, purpose, bannerText }; // 复用拨号超时与错误处理
+  dialingFriend = { name: friendTarget ? friendTarget.name : '对方设备', deviceId: deviceId, from, purpose, bannerText, silent }; // 复用拨号超时与错误处理；silent 供 failFriendDial 分流
   if (from === 'localsend') {
     // LocalSend 行内等待动画里已有提示，不再压横幅
   } else {
-    showDialBanner(bannerText);
+    if (!silent) showDialBanner(bannerText); // 自动链路不压横幅
   }
   clearDialTimeout();
   dialTimeout = setTimeout(() => failFriendDial('对方未响应（可能不在线或拒绝了请求）'), 25000);
@@ -2916,7 +2934,7 @@ async function dialDevice(deviceId, from = null, purpose = 'connect') {
     clearDialTimeout();
     dialingFriend = null;
     dialCandidates = [];
-    showToast('这是本设备的地址', 'warning');
+    if (!silent) showToast('这是本设备的地址', 'warning');
     return;
   }
   openCandidateConn(candidates[0], deviceId, purpose, bannerText);
@@ -3537,6 +3555,10 @@ function handlePeerError(err, kind, p) {
         failFriendDial('对方当前不在线或无法直达；若对方页面显示在线，请双方核对左上角版本号一致后再试');
       } else if (dialingCode) {
         failCodeDial('连接码无效或已过期，请确认后重试');
+      } else if (Date.now() < silentDialQuietUntil) {
+        // 自动链路（silent 拨号）的晚到 peer-unavailable：拨号态已被
+        // failFriendDial 清场、识别不到 silent，靠静默窗兜住不弹窗
+        console.warn('[dial][silent] peer-unavailable（自动链路静默窗内，不弹窗）');
       } else {
         showToast('对方不在线', 'error');
       }
@@ -3736,11 +3758,19 @@ function failCodeDial(msg) {
 
 function failFriendDial(msg) {
   if (!dialingFriend) return;
+  const silent = !!(dialingFriend && dialingFriend.silent);
   dialingFriend = null;
   dialCandidates = [];
   endDial();
   clearDialTimeout();
   hideDialBanner();
+  // 两条失败路径分流：用户手动拨号 → 一次点击一次明确提示；自动链路
+  // （自动重连/中断自动重发）→ 完全静默，仅 console.warn 留诊断线索
+  if (silent) {
+    console.warn('[dial][silent] 自动链路拨号失败（不弹窗）:', msg);
+    // 同上：信令已固定为自建 DO 通道，无需切回动作
+    return;
+  }
   showToast(msg, 'error');
   // 同上：信令已固定为自建 DO 通道，无需切回动作
 }
@@ -4166,7 +4196,7 @@ function maybeAutoReconnect(s) {
       reconnectJobs.delete(code);
       return;
     }
-    if (existing) closeSession(existing); // 僵尸会话不能挡住手动/自动重拨
+    if (existing) closeSession(existing, 'cleanup'); // 僵尸会话不能挡住手动/自动重拨；程序化清场不登记中断卡片
     if (job.attempts >= 4 || (!isDeviceIdSeenLive(code) && Date.now() > networkRecoveryUntil)) {
       reconnectJobs.delete(code);
       return;
@@ -4179,8 +4209,9 @@ function maybeAutoReconnect(s) {
     job.attempts++;
     if (job.attempts === 1) showToast('连接中断，正在自动重连…', 'info');
     // 重拨前确保信令已重新注册；失败时 connectToFriend/dialDevice 自身会收尾
+    // （自动链路传 silent：失败不弹「对方不在线」等提示，仅 console.warn）
     const f = friends.find(fr => fr.deviceId === code);
-    const p = f ? connectToFriend(f.id, 'reconnect') : dialDevice(code, 'reconnect');
+    const p = f ? connectToFriend(f.id, 'reconnect', { silent: true }) : dialDevice(code, 'reconnect', 'connect', { silent: true });
     if (p && p.catch) p.catch(e => console.warn('自动重连失败:', e));
     job.timer = setTimeout(tick, job.attempts === 1 ? 8000 : 12000);
   };
@@ -6008,14 +6039,32 @@ function snapshotInterrupted(s) {
 }
 
 // 把已登记的中断记录弹成卡片（一次性消费）：回前台补弹入口；弹出即清，
-// 不会在 Map 里常驻累积
+// 不会在 Map 里常驻累积。若中断卡已开着（去重护栏命中），记录留在表内
+// 等下一次触发再补弹，避免同屏叠加两张同类卡
 function flushInterruptRecords() {
   if (!pendingInterruptRecords.size) return;
+  if (interruptCardOpen()) return; // 弹层去重护栏：已开卡，待下次触发补弹
   const toShow = [];
   pendingInterruptRecords.forEach(rec => { if (!rec.surfaceShown) toShow.push(...rec.entries); });
   pendingInterruptRecords.clear(); // 弹过或已通知的记录即清，禁止常驻
   persistInterruptRecords();       // 同步落盘（此时待弹为空 → 移除）
   if (toShow.length) showInterruptCard(toShow);
+}
+
+// 弹层去重护栏：中断卡是否正开着（选择弹窗壳可见 + 中断卡「知道了」按钮
+// 在 DOM——choiceModal 是单例壳，关闭只加 hidden 不清内容，两个条件须同时成立）
+function interruptCardOpen() {
+  const modal = document.getElementById('choiceModal');
+  return !!(modal && !modal.classList.contains('hidden') && document.getElementById('interruptOkBtn'));
+}
+
+// 护栏命中时的并队：条目挂进待弹登记（TTL 内有效），等卡片关闭后的下一次
+// flush/checkWakeInterrupted 补弹；synthetic key 避免和按 deviceId 登记的记录冲突
+function queueInterruptEntries(entries) {
+  if (!entries || !entries.length) return;
+  const key = 'queued-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  pendingInterruptRecords.set(key, { peerName: (entries[0] && entries[0].peerName) || '', entries, surfaceShown: false, at: Date.now() });
+  persistInterruptRecords();
 }
 
 // ==================== 跨页面生命周期落盘（Android 后台丢弃兜底） ====================
@@ -6101,6 +6150,52 @@ function restoreInterruptRecordsOnLoad() {
   showInterruptCard(entries, '上一页面被系统回收导致传输中断<br>文件需要重新选择后发送（文件句柄不跨页面保留）');
 }
 
+// ==================== 自动重发重试（节流 + 退避 + 上限） ====================
+// 用户点过「重新发送」后对端一直不在线：程序化重拨必须有节流，否则每轮
+// 失败都走一遍拨号栈（横幅/错误提示），对端长时间离线时「对方不在线」
+// 弹窗刷屏占满页面。退避 5s→10s→20s（封顶），TTL 内最多 RESEND_RETRY_MAX
+// 次；到上限或 TTL 过期 → giveUpResend 收场（toast 一次，属状态变化，允许）。
+// 重试期的拨号全部走 silent 链路：失败零弹窗，仅 console 留诊断线索
+const RESEND_RETRY_MAX = 10;
+const RESEND_RETRY_BASE_MS = 5000;
+const RESEND_RETRY_CAP_MS = 20000;
+
+// 放弃自动重发：清任务（含挂起的重试定时器）+ 一次性告知（状态变化允许 toast）
+function giveUpResend(deviceId, reason) {
+  const job = interruptResendJobs.get(deviceId);
+  if (job) {
+    if (job.retryTimer) { clearTimeout(job.retryTimer); job.retryTimer = null; }
+    job.dead = true;
+    interruptResendJobs.delete(deviceId);
+  }
+  console.log('[interrupt-resend] 自动重发放弃 (' + (reason || '') + '):', deviceId);
+  showToast('对方长时间未上线，已停止自动重发；需要时可再次点击「重新发送」', 'info');
+}
+
+// 退避重试链：job.attempts 计成功发起的拨号次数；链上任何一环发现任务已被
+// 消费（hello 注入投递）/过期清理/替换（用户再次点击）即整体熄火
+function scheduleResendRetry(deviceId, job) {
+  if (!job || job.dead || !interruptResendJobs.has(deviceId)) return;
+  if (job.attempts >= RESEND_RETRY_MAX) { giveUpResend(deviceId, '重试次数用尽'); return; }
+  const delay = Math.min(RESEND_RETRY_BASE_MS * Math.pow(2, job.attempts), RESEND_RETRY_CAP_MS);
+  if (job.retryTimer) clearTimeout(job.retryTimer);
+  job.retryTimer = setTimeout(() => {
+    job.retryTimer = null;
+    const cur = interruptResendJobs.get(deviceId);
+    if (!cur || cur !== job || cur.dead) return; // 已投递/已过期/已被新点击替换
+    const sess = findSessionByDeviceId(deviceId);
+    if (sess && isSessionAlive(sess)) return; // 已连上：任务留给 hello 注入消费，停链
+    if (!navigator.onLine) { scheduleResendRetry(deviceId, job); return; }   // 本机无网：退避等待，不计次
+    if (dialActive || dialingFriend || dialingCode || networkRecoveryRunning) {
+      scheduleResendRetry(deviceId, job); return;                            // 拨号栈忙：稍后再看，不计次
+    }
+    job.attempts++;
+    console.log('[interrupt-resend] 自动重发第 ' + job.attempts + '/' + RESEND_RETRY_MAX + ' 次重拨（静默）:', deviceId);
+    dialDevice(deviceId, 'reconnect', 'connect', { silent: true }).catch(() => { /* 失败已静默，任务保留继续退避 */ });
+    scheduleResendRetry(deviceId, job); // 链下一次退避；连上后由 hello 消费任务自然停链
+  }, delay);
+}
+
 // 回前台断连检查（在 visibilitychange → visible 时调用）
 // 兜「仍留在 sessions 表里的死亡/疑似死亡会话」：冻结解除瞬间，close 事件/
 // sendFileOn catch 等常规失败路径常常抢在本检查之前就被执行（会话标 failed、
@@ -6182,6 +6277,14 @@ function finishInterruptedSession(s) {
 // 文件句柄，不提供「重新发送」，但提供「重新连接对方」一键重拨（重连后手动
 // 重选文件发送）
 function showInterruptCard(entries, subtext) {
+  // 弹层去重护栏：中断卡已开着 → 不叠加（同一会话同类弹窗同一时间最多一个）。
+  // checkWakeInterrupted 重复触发（多次 visibility 变化/多路径收尾）到此全部被拦；
+  // 被拦条目并队登记（落盘），卡片关闭后的下一次 flush 触发补弹，绝不丢弃
+  if (interruptCardOpen()) {
+    console.log('[interrupt] 中断卡已开着，本次条目并队等待补弹（' + entries.length + ' 条）');
+    queueInterruptEntries(entries);
+    return;
+  }
   const rows = entries.map(e => `
     <div class="text-left bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
       <div class="font-medium text-slate-800 mb-1 truncate">
@@ -6275,19 +6378,27 @@ function showInterruptCard(entries, subtext) {
 
 // 「重新发送」= 登记重发任务 + 立即按现有拨号栈重连（好友免确认；陌生设备
 // 仍由对方确认，连接语义不变）。重拨只是加速通道恢复：10 分钟有效期内对端
-// 任何路径重连回来（好友直连/连接码均可）都会经 hello 注入自动续发
+// 任何路径重连回来（好友直连/连接码均可）都会经 hello 注入自动续发。
+// 首拨（用户点击，失败有明确提示）之后进入静默退避重试链（scheduleResendRetry）
 function resumeInterruptedSend(deviceId) {
   if (!deviceId || !interruptResendJobs.has(deviceId)) return;
+  const job = interruptResendJobs.get(deviceId);
   showToast('正在重新连接对方…', 'info');
   dialDevice(deviceId).catch(() => { /* 失败提示由拨号栈负责；任务保留在表中 */ });
-  // 10 秒仍未连上：给出明确等待预期，而不是默默无反馈
+  // 10 秒仍未连上：给出明确等待预期。每个 TTL 周期至多一次（job.waitToastShown），
+  // 不随重试轮数刷屏；重读表内任务，用户再次点击替换 job 后旧定时器自然失效
   setTimeout(() => {
+    const cur = interruptResendJobs.get(deviceId);
+    if (!cur || cur.dead) return; // 已投递/已过期/已放弃
     if (dialActive || dialingFriend || dialingCode) return; // 还在拨：拨号横幅在跑
-    const cur = findSessionByDeviceId(deviceId);
-    if (cur && isSessionAlive(cur)) return; // 已连上，马上会经 hello 注入续发
-    if (!interruptResendJobs.has(deviceId)) return; // 已完成投递或已过期清理
-    showToast('等待对方上线：10 分钟内对方重新连接会自动续发', 'info');
+    const sess = findSessionByDeviceId(deviceId);
+    if (sess && isSessionAlive(sess)) return; // 已连上，马上会经 hello 注入续发
+    if (!cur.waitToastShown) {
+      cur.waitToastShown = true;
+      showToast('等待对方上线：10 分钟内对方重新连接会自动续发', 'info');
+    }
   }, 10000);
+  scheduleResendRetry(deviceId, job); // 首拨失败后进入静默退避重试（到上限 give-up）
 }
 
 // 重发任务 TTL 清理（挂在 5s 健康巡检定时器上）：有效期内未投递即出表，
@@ -6296,6 +6407,8 @@ function pruneInterruptResendJobs() {
   const now = Date.now();
   interruptResendJobs.forEach((job, key) => {
     if (now - job.at > INTERRUPT_RESEND_TTL_MS) {
+      if (job.retryTimer) { clearTimeout(job.retryTimer); job.retryTimer = null; } // 重试链一并熄火
+      job.dead = true;
       interruptResendJobs.delete(key);
       console.log('[interrupt-resend] 重发任务已过期清理:', key);
     }
@@ -6327,9 +6440,11 @@ function disconnect() {
 }
 
 // 关闭单个会话：清理传输心跳、切到剩余会话、复位聊天窗口；不影响其他会话。
-// cause='manual' 表示用户主动断开（顶栏/会话条×），中断任务不登记；其余
-// 调用（close 事件/心跳判死/ICE failed/握手超时/重拨清场）均视为系统性
-// 关闭，未完成传输会被 snapshotInterrupted 登记成「传输中断」卡片记录
+// cause='manual' 表示用户主动断开（顶栏/会话条×），中断任务不登记；
+// cause='cleanup' 表示程序化清僵尸（重拨前的占位清理），同一会话随后的
+// 拨号/收场另有交代，同样不登记——否则自动重拨链路每轮清场都重复弹卡；
+// 其余调用（close 事件/心跳判死/ICE failed/握手超时）均视为系统性关闭，
+// 未完成传输会被 snapshotInterrupted 登记成「传输中断」卡片记录
 function closeSession(s, cause) {
   if (!s || s.closed) return;
   s.closed = true;
@@ -6342,8 +6457,8 @@ function closeSession(s, cause) {
     // W3: 会话清理 → 中断提交（已写字节保留为 .partial）；fire-and-forget 不阻塞
     settleFileSink(it, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(it); });
   }
-  if (cause === 'manual') {
-    // 用户主动断开：中断任务不登记（用户知情）
+  if (cause === 'manual' || cause === 'cleanup') {
+    // 用户主动断开 / 程序化清僵尸：中断任务不登记（用户知情或另有交代）
   } else {
     snapshotInterrupted(s); // 系统性关闭：快照未完成传输，供回前台补弹与重发
   }
