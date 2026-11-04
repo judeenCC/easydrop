@@ -5270,7 +5270,7 @@ function renderSessionChips() {
     const closeBtn = chip.querySelector('[data-session-close]');
     if (closeBtn) closeBtn.onclick = (e) => {
       e.stopPropagation();
-      closeSession(s, '已断开连接');
+      closeSession(s, 'manual'); // 用户主动断开：不登记中断卡片
     };
     box.appendChild(chip);
   });
@@ -5931,7 +5931,76 @@ function wakeLockSync() {
 const interruptResendJobs = new Map();  // key: 对端 deviceId → { items, at }
 const INTERRUPT_RESEND_TTL_MS = 10 * 60 * 1000; // 重发任务有效期：超期不再续发、立即出表
 
+// ==================== 中断记录登记（closeSession 统一漏斗） ====================
+// 为什么在 closeSession 登记：冻结解除的瞬间，close 事件 / sendFileOn 的
+// catch/finally / 健康巡检常常抢在 checkWakeInterrupted 之前把会话收场
+// （条目标 failed、会话被移出 sessions 表）——等回前台检查时已「无案可查」，
+// 表现即：卡片不出现、中断记录消失。把「有无未完成传输」的快照下沉到
+// closeSession：无论哪条失败路径先到，死会话里的任务都会被留存。
+const pendingInterruptRecords = new Map(); // key: 对端 deviceId（无身份时会话 key）→ { peerName, entries, surfaceShown }
+
+// closeSession 调用（cause≠'manual' 时）：快照未完成传输 → 登记重复弹卡记录
+function snapshotInterrupted(s) {
+  if (!s || s.virtual || s.__interruptHandled) { return; }
+  const midReceive = s.currentReceive;
+  const midSend = s.currentTransfer;
+  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing');
+  if (!midReceive && !sendItems.length) return; // 无未完成传输：普通收尾，不登记
+
+  const deviceId = (s.identity && s.identity.deviceId) || '';
+  const peerName = sessionDisplayName(s);
+  const entries = [];
+  if (midReceive) {
+    entries.push({
+      isSend: false, deviceId, peerName,
+      name: midReceive.name || '未命名文件',
+      detail: '已接收 ' + formatFileSize(midReceive.receivedBytes || 0) + ' / ' + formatFileSize(midReceive.size || 0) + '，传输未完成'
+    });
+  }
+  if (sendItems.length) {
+    const first = sendItems[0];
+    const failedCount = sendItems.filter(i => i.status === 'failed').length;
+    const pendingCount = sendItems.length - failedCount;
+    entries.push({
+      isSend: true, deviceId, peerName, sendItems,
+      name: midSend ? midSend.name : (first.name || '未命名文件'),
+      detail: '已发送 ' + formatFileSize((midSend ? midSend.sentBytes : 0) || 0) + ' / ' + formatFileSize(first.size || 0) +
+        (failedCount > 1 ? '（' + failedCount + ' 个文件）' : '') +
+        (pendingCount > 0 ? '；队列还有 ' + pendingCount + ' 个待发文件，将一并重发' : '')
+    });
+  }
+
+  const key = deviceId || ('session:' + s.key);
+  const holdForWake = !!document.hidden;                  // 后台冻结期死亡：挂起，回前台补弹
+  const immediateMobile = !holdForWake && SELF_IS_MOBILE; // 手机前台死亡：不等回前台，立即弹卡
+  let rec = pendingInterruptRecords.get(key);
+  if (!rec) { rec = { peerName, entries: [], surfaceShown: true, at: Date.now() }; pendingInterruptRecords.set(key, rec); }
+  console.log('[interrupt] 登记中断任务 (' + key + '): ' + entries.map(e => e.name).join(', ') +
+    (holdForWake ? '（后台期死亡，回前台补弹）' : (immediateMobile ? '（前台死亡，立即弹卡）' : '（前台死亡：已 toast 告知，不补卡）')));
+  rec.entries = rec.entries.concat(entries);
+  // surfaceShown：true=已告知过（桌面可见死亡有失败 toast，维持桌面零变化，不再补卡）；
+  // false=待弹（后台冻结死亡 → 回前台补弹；手机可见死亡 → 下方立即弹卡）。
+  // 只降不升：先前已判「待弹」的记录，不能被后来合并的可见死亡翻成「已告知」
+  if (rec.surfaceShown) rec.surfaceShown = !holdForWake && !immediateMobile;
+
+  if (immediateMobile) flushInterruptRecords();
+}
+
+// 把已登记的中断记录弹成卡片（一次性消费）：回前台补弹入口；弹出即清，
+// 不会在 Map 里常驻累积
+function flushInterruptRecords() {
+  if (!pendingInterruptRecords.size) return;
+  const toShow = [];
+  pendingInterruptRecords.forEach(rec => { if (!rec.surfaceShown) toShow.push(...rec.entries); });
+  pendingInterruptRecords.clear(); // 弹过或已通知的记录即清，禁止常驻
+  if (toShow.length) showInterruptCard(toShow);
+}
+
 // 回前台断连检查（在 visibilitychange → visible 时调用）
+// 兜「仍留在 sessions 表里的死亡/疑似死亡会话」：冻结解除瞬间，close 事件/
+// sendFileOn catch 等常规失败路径常常抢在本检查之前就被执行（会话标 failed、
+// 甚至已被 closeSession 清出表）。已收走的中断由 closeSession 的 snapshot
+// 漏斗登记成记录，末尾统一补弹；这里只负责「还没被收场」的活尸。
 function checkWakeInterrupted() {
   sessions.forEach(s => {
     if (!s || s.closed || s.virtual) return;
@@ -5949,17 +6018,14 @@ function checkWakeInterrupted() {
       }, 6000);
     }
   });
+  // 冻结期间（或此后任意时刻）closeSession 已登记的中断记录 → 在这里统一补弹
+  flushInterruptRecords();
 }
 
-// 单个死亡会话的中断收尾：收集信息 → closeSession（沿用既有 UI 清理/码界面
-// 复位）→ 弹「传输中断」卡片。不自动重拨：是否续发交由用户在卡片上决定
-function finishInterruptedSession(s) {
-  if (!s || s.closed) return;
-  const midReceive = s.currentReceive;
-  const midSend = s.currentTransfer;
+// 会话对象在中断收尾关闭会话前收集断传信息（内存 item、队列余量、对端身份）
+function interruptEntriesFromSession(s, midReceive, midSend) {
   const peerName = sessionDisplayName(s);
   const deviceId = (s.identity && s.identity.deviceId) || '';
-  closeSession(s); // 内部会把传输中条目标记为 failed，供下方重发集合拾取
   const entries = [];
   if (midReceive) {
     entries.push({
@@ -5981,6 +6047,19 @@ function finishInterruptedSession(s) {
         (pendingCount > 0 ? '；队列还有 ' + pendingCount + ' 个待发文件，将一并重发' : '')
     });
   }
+  return entries;
+}
+
+// 单个死亡/疑似死亡会话的收尾（checkWakeInterrupted 活尸路径）：此路径由本
+// 函数直接弹卡（回前台瞬间用户注意力就在屏上）；先打 __interruptHandled
+// 标记，让 closeSession 的 snapshot 漏斗跳过登记，避免同一次中断双卡
+function finishInterruptedSession(s) {
+  if (!s || s.closed) return;
+  const midReceive = s.currentReceive;
+  const midSend = s.currentTransfer;
+  const entries = interruptEntriesFromSession(s, midReceive, midSend);
+  s.__interruptHandled = true;
+  closeSession(s); // 内部会把传输中条目标记为 failed，供下方重发集合拾取
   if (entries.length) showInterruptCard(entries);
 }
 
@@ -6055,6 +6134,14 @@ function pruneInterruptResendJobs() {
       console.log('[interrupt-resend] 重发任务已过期清理:', key);
     }
   });
+  // 中断卡片登记同走 TTL：正常寿命是「回前台补弹」或「下一次 flush」，
+  // 但若页面长挂前台不触发 flush，也不允许常驻累积
+  pendingInterruptRecords.forEach((rec, key) => {
+    if (now - rec.at > INTERRUPT_RESEND_TTL_MS) {
+      pendingInterruptRecords.delete(key);
+      console.log('[interrupt] 中断卡片登记已过期清理:', key);
+    }
+  });
 }
 
 // ==================== Connection Management ====================
@@ -6066,12 +6153,15 @@ function disconnect() {
     return;
   }
   const isVirtual = !!s.virtual;
-  closeSession(s);
+  closeSession(s, 'manual'); // 用户主动断开：不登记中断卡片
   showToast(isVirtual ? '已关闭该会话的记录窗口' : '已断开连接', 'info');
 }
 
-// 关闭单个会话：清理传输心跳、切到剩余会话、复位聊天窗口；不影响其他会话
-function closeSession(s) {
+// 关闭单个会话：清理传输心跳、切到剩余会话、复位聊天窗口；不影响其他会话。
+// cause='manual' 表示用户主动断开（顶栏/会话条×），中断任务不登记；其余
+// 调用（close 事件/心跳判死/ICE failed/握手超时/重拨清场）均视为系统性
+// 关闭，未完成传输会被 snapshotInterrupted 登记成「传输中断」卡片记录
+function closeSession(s, cause) {
   if (!s || s.closed) return;
   s.closed = true;
   s.fileQueue.forEach(stopRenderHeartbeat);
@@ -6082,6 +6172,11 @@ function closeSession(s) {
     it.status = 'failed';
     // W3: 会话清理 → 中断提交（已写字节保留为 .partial）；fire-and-forget 不阻塞
     settleFileSink(it, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(it); });
+  }
+  if (cause === 'manual') {
+    // 用户主动断开：中断任务不登记（用户知情）
+  } else {
+    snapshotInterrupted(s); // 系统性关闭：快照未完成传输，供回前台补弹与重发
   }
   wakeLockSync(); // 会话收尾（手动断开/心跳判死/ICE failed/握手超时）→ 释放
   try { if (s.conn) s.conn.close(); } catch (e) { /* noop */ }
