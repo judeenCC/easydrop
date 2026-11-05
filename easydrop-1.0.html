@@ -529,8 +529,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.11.05-r26 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r26</button>
+                title="当前版本 v26.11.05-r27 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r27</button>
             </div>
           </div>
         </div>
@@ -5389,6 +5389,7 @@ async function sendFileOn(s, fileId) {
 
   s.currentTransfer = item;
   item.status = 'sending';
+  item.acked = false; // P1-1：本次发送进入「等待接收确认」态；只有显式 false 才被 sent-unacked 滤网抓取（旧条目/历史条目 acked=undefined 不算）
   // 速率统计：滑动窗口采样 + 渲染心跳
   item.samples = [{ t: Date.now(), b: 0 }];
   item.sentBytes = 0;
@@ -6017,7 +6018,7 @@ function snapshotInterrupted(s) {
   const midSend = s.currentTransfer;
   // sent-unacked（P1-1）：已发完但未收到对方 file-ack 确认的条目，断开后一律
   // 按中断登记重发——对端可能根本没收到尾部数据；history 条目是历史回填，排除
-  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && !i.acked && !i.history));
+  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false && !i.history));
   if (!midReceive && !sendItems.length) return; // 无未完成传输：普通收尾，不登记
 
   const deviceId = (s.identity && s.identity.deviceId) || '';
@@ -6034,7 +6035,7 @@ function snapshotInterrupted(s) {
     const first = sendItems[0];
     const failedCount = sendItems.filter(i => i.status === 'failed').length;
     const pendingCount = sendItems.length - failedCount;
-    const unackedFirst = first.status === 'sent' && !first.acked;
+    const unackedFirst = first.status === 'sent' && first.acked === false;
     entries.push({
       isSend: true, deviceId, peerName, sendItems,
       name: midSend ? midSend.name : (first.name || '未命名文件'),
@@ -6215,6 +6216,9 @@ function scheduleResendRetry(deviceId, job) {
     if (dialActive || dialingFriend || dialingCode || networkRecoveryRunning) {
       scheduleResendRetry(deviceId, job); return;                            // 拨号栈忙：稍后再看，不计次
     }
+    // 自动重连链路（maybeAutoReconnect）正在拨同一设备：让路不计次。双向传输时
+    // 两端各自的自动重连 + 重发链同时拨号会多路 ICE 对撞（实测续传不稳/变慢）
+    if (reconnectJobs.has(deviceId)) { scheduleResendRetry(deviceId, job); return; }
     job.attempts++;
     console.log('[interrupt-resend] 自动重发第 ' + job.attempts + '/' + RESEND_RETRY_MAX + ' 次重拨（静默）:', deviceId);
     dialDevice(deviceId, 'reconnect', 'connect', { silent: true }).catch(() => { /* 失败已静默，任务保留继续退避 */ });
@@ -6264,7 +6268,7 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
   }
   // sent-unacked（P1-1）：同 snapshotInterrupted 的滤网——已发完未确认的条目
   // 断开后按中断登记；history 条目是历史回填，排除
-  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && !i.acked && !i.history));
+  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false && !i.history));
   // 活尸/硬死检查路径在 closeSession 打 failed 标记之前收集：正在发送中的
   // 条目也必须算进来，否则「单文件传到一半」的会话收集结果为空 → 无卡无记录
   if (midSend && !sendItems.includes(midSend)) sendItems.unshift(midSend);
@@ -6273,7 +6277,7 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
     const failedCount = sendItems.filter(i => i.status === 'failed').length;
     // 正在发送中的条目就是「已发送 X / Y」的主角，不重复计入待发
     const pendingCount = sendItems.length - failedCount - (midSend && midSend.status === 'sending' ? 1 : 0);
-    const unackedFirst = first.status === 'sent' && !first.acked;
+    const unackedFirst = first.status === 'sent' && first.acked === false;
     entries.push({
       isSend: true, deviceId, peerName, sendItems,
       name: midSend ? midSend.name : (first.name || '未命名文件'),
@@ -6344,7 +6348,7 @@ function showInterruptCard(entries, subtext) {
   // 对端离线的发送条目（P0-1）：自动登记重发任务。不立即拨号、不弹 toast——
   // 卡片本身就是告知；静默退避重试链随后接管，对端上线即自动续发。
   // 任务已存在则合并条目（防重复登记）并刷新 TTL，重试链重挂（幂等）
-  offlineTargets.forEach(e => {
+  const registerOfflineJob = (e) => {
     const prev = interruptResendJobs.get(e.deviceId);
     if (prev) {
       const seen = new Set(prev.items.map(it => String(it && it.id)));
@@ -6356,7 +6360,8 @@ function showInterruptCard(entries, subtext) {
       interruptResendJobs.set(e.deviceId, job);
       scheduleResendRetry(e.deviceId, job);
     }
-  });
+  };
+  offlineTargets.forEach(registerOfflineJob);
   // 重载恢复卡的「重新连接对方」：仅 restored 发送条目且对端当前在线才给
   // （对端离线时点了也拨不出去；接收侧 restored 永不显示）
   const reconnectTargets = [];
@@ -6366,36 +6371,43 @@ function showInterruptCard(entries, subtext) {
       seenDevices.add(e.deviceId); reconnectTargets.push(e);
     }
   });
+  // 在线目标工作集：卡片开着期间随 presence 心跳 TTL（16s）动态收缩。
+  // 对端关网页的瞬间卡片弹出时，其最后心跳仍在 TTL 内 → 会误判「在线」并
+  // 显示按钮；下方复查定时器负责在心跳过期后把按钮撤掉、文案切到离线态
+  let liveResend = onlineTargets.slice();
+  let liveReconnect = reconnectTargets.slice();
+  const DEFAULT_SUB = '连接断开，文件传输未完成<br>（锁屏/熄屏或切后台导致的断连是网页版已知硬限制）';
+  const OFFLINE_SUB = '对方已离线，等待其上线后自动续发';
   // 文案分流：全部发送条目对端离线 → 自动续发说明；纯接收 → 等待对方重发；
   // 其余维持默认。restored 条目的去向说明已在各行内注明
-  const sub = subtext || (sendTargets.length && !onlineTargets.length
-    ? '对方已离线，等待其上线后自动续发'
+  const sub = subtext || (sendTargets.length && !liveResend.length
+    ? OFFLINE_SUB
     : (!sendTargets.length && !restoredSend.length && hasRecv
       ? '等待对方重新发送<br>长时间未恢复可让发送方重新选择文件发送'
-      : '连接断开，文件传输未完成<br>（锁屏/熄屏或切后台导致的断连是网页版已知硬限制）'));
+      : DEFAULT_SUB));
   // 网络门控：设备无网时「重新发送/重新连接」点了也拨不出去（飞行模式中断
   // 的典型瞬间），先隐藏并显示等待恢复提示；卡片开着期间监听 online/offline，
   // 网络一回来自动把按钮补上
   const netUp = (() => { try { return navigator.onLine !== false; } catch (e) { return true; } })();
-  const netDep = !!(onlineTargets.length || reconnectTargets.length);
-  const netHintText = onlineTargets.length && reconnectTargets.length ? '网络恢复后即可重新发送或重连对方'
-    : onlineTargets.length ? '网络恢复后即可重新发送' : '网络恢复后即可重新连接对方';
+  const netDep = !!(liveResend.length || liveReconnect.length);
+  const netHintText = liveResend.length && liveReconnect.length ? '网络恢复后即可重新发送或重连对方'
+    : liveResend.length ? '网络恢复后即可重新发送' : '网络恢复后即可重新连接对方';
   const html = `
     <div class="text-center mb-5">
       <div class="w-16 h-16 rounded-2xl bg-yellow-500/15 flex items-center justify-center mx-auto mb-4">
         <i class="fas fa-triangle-exclamation text-2xl text-yellow-500"></i>
       </div>
       <h4 class="font-semibold text-slate-800 mb-2">传输中断</h4>
-      <p class="text-sm text-slate-400">${sub}</p>
+      <p id="interruptSubtext" class="text-sm text-slate-400">${sub}</p>
     </div>
     <div class="space-y-2 mb-5">${rows}</div>
     <div class="space-y-3">
-      ${onlineTargets.length ? `
+      ${liveResend.length ? `
       <button id="interruptResendBtn" style="display:${netUp ? '' : 'none'};" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
         <i class="fas fa-rotate-right"></i>
         重新发送
       </button>` : ''}
-      ${reconnectTargets.length ? `
+      ${liveReconnect.length ? `
       <button id="interruptReconnectBtn" style="display:${netUp ? '' : 'none'};" class="w-full py-3 rounded-xl btn-primary text-white font-medium flex items-center justify-center gap-2">
         <i class="fas fa-link"></i>
         重新连接对方
@@ -6415,7 +6427,7 @@ function showInterruptCard(entries, subtext) {
   const rsBtn = document.getElementById('interruptResendBtn');
   if (rsBtn) rsBtn.onclick = () => {
     closeChoiceModal();
-    onlineTargets.forEach(e => {
+    liveResend.forEach(e => {
       const cur = interruptResendJobs.get(e.deviceId);
       if (cur) {
         const seen = new Set(cur.items.map(it => String(it && it.id)));
@@ -6433,11 +6445,41 @@ function showInterruptCard(entries, subtext) {
   const rcBtn = document.getElementById('interruptReconnectBtn');
   if (rcBtn) rcBtn.onclick = () => {
     closeChoiceModal();
-    if (reconnectTargets.length) showToast('正在重新连接对方…', 'info');
-    reconnectTargets.forEach(e => {
+    if (liveReconnect.length) showToast('正在重新连接对方…', 'info');
+    liveReconnect.forEach(e => {
       dialDevice(e.deviceId).catch(() => { /* 失败提示由拨号栈负责 */ });
     });
   };
+  // 在线状态动态复查（P0-1）：presence 心跳 TTL 16s —— 对端关网页的瞬间，
+  // 卡片弹出时其最后心跳仍新鲜，会误判「在线」并显示按钮。卡片开着期间每 2s
+  // 复查一次：对端转离线 → 撤按钮、换「对方已离线」文案、自动登记重发任务
+  // （静默链路接管）；卡片关闭（DOM 消失）自清理，不留常驻定时器
+  if (liveResend.length || liveReconnect.length) {
+    const recheck = setInterval(() => {
+      const subEl = document.getElementById('interruptSubtext');
+      const rbtn = document.getElementById('interruptResendBtn');
+      const cbtn = document.getElementById('interruptReconnectBtn');
+      if ((!subEl || !subEl.isConnected) && (!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected)) {
+        clearInterval(recheck);
+        return;
+      }
+      const nextResend = liveResend.filter(e => peerLive(e.deviceId));
+      const nextReconnect = liveReconnect.filter(e => peerLive(e.deviceId));
+      liveResend.forEach(e => { if (!nextResend.includes(e)) registerOfflineJob(e); }); // 转离线：登记静默续发
+      liveResend = nextResend;
+      liveReconnect = nextReconnect;
+      if (rbtn) rbtn.style.display = liveResend.length ? '' : 'none';
+      if (cbtn) cbtn.style.display = liveReconnect.length ? '' : 'none';
+      const hintEl = document.getElementById('interruptOfflineHint');
+      if (hintEl) hintEl.classList.toggle('hidden', navigator.onLine !== false || (!liveResend.length && !liveReconnect.length));
+      // 文案跟随：发送目标全部转离线 → 切「对方已离线」；有目标在线 → 回默认
+      if (subEl && !subtext) {
+        if (sendTargets.length && !liveResend.length) subEl.innerHTML = OFFLINE_SUB;
+        else if (sendTargets.length && liveResend.length) subEl.innerHTML = DEFAULT_SUB;
+      }
+      if (!liveResend.length && !liveReconnect.length) clearInterval(recheck);
+    }, 2000);
+  }
   // 网络恢复补按钮：监听 online/offline；卡片已关（元素不在 DOM）时自清理，
   // 不留常驻监听
   if (netDep) {
@@ -6451,8 +6493,9 @@ function showInterruptCard(entries, subtext) {
         window.removeEventListener('offline', applyNetGate);
         return;
       }
-      if (rbtn) rbtn.style.display = up ? '' : 'none';
-      if (cbtn) cbtn.style.display = up ? '' : 'none';
+      // 在线工作集为空（对端已离线）时不因网络恢复重新亮出按钮
+      if (rbtn) rbtn.style.display = (up && liveResend.length) ? '' : 'none';
+      if (cbtn) cbtn.style.display = (up && liveReconnect.length) ? '' : 'none';
       const hintEl = document.getElementById('interruptOfflineHint');
       if (hintEl) hintEl.classList.toggle('hidden', up);
     };
@@ -6469,7 +6512,12 @@ function resumeInterruptedSend(deviceId) {
   if (!deviceId || !interruptResendJobs.has(deviceId)) return;
   const job = interruptResendJobs.get(deviceId);
   showToast('正在重新连接对方…', 'info');
-  dialDevice(deviceId).catch(() => { /* 失败提示由拨号栈负责；任务保留在表中 */ });
+  // 自动重连链路已在拨同一设备：本端立即再拨会与它（以及双向传输时对端的
+  // 自动重连）对撞，多路 ICE 同时建连 → 续传不稳/速度骤降。让自动重连先跑，
+  // 静默退避链在它结束后接管（scheduleResendRetry 回调内同样避让）
+  if (!reconnectJobs.has(deviceId)) {
+    dialDevice(deviceId).catch(() => { /* 失败提示由拨号栈负责；任务保留在表中 */ });
+  }
   // 10 秒仍未连上：给出明确等待预期。每个 TTL 周期至多一次（job.waitToastShown），
   // 不随重试轮数刷屏；重读表内任务，用户再次点击替换 job 后旧定时器自然失效
   setTimeout(() => {
