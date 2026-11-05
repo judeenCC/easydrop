@@ -445,7 +445,12 @@ tailwind.config = {
     transition: grid-template-rows 0.5s cubic-bezier(0.22, 0.85, 0.3, 1),
                 visibility 0s;
   }
-  .entry-slot > * { min-height: 0; margin-top: 0; transition: margin-top 0.5s cubic-bezier(0.22, 0.85, 0.3, 1); }
+  /* min-width: 0：grid 列轨道的 auto sizing 会被 item 的自动最小尺寸（overflow
+     visible → = 子树 min-content）撑大——聊天面板 #chatInputBar 的 min-content
+     约 407px（input 固有宽度为主），手机 390px 视口下把轨道撑到 434px 超出卡片，
+     被 body 的 overflow-x:hidden 硬裁。归零后轨道恒等于容器宽，内部 flex 行
+     （输入框 min-w-0 等）在布局期正常收缩。覆盖 send/receive/chat 三个槽位 */
+  .entry-slot > * { min-width: 0; min-height: 0; margin-top: 0; transition: margin-top 0.5s cubic-bezier(0.22, 0.85, 0.3, 1); }
   /* 间距放到展开态：0fr 轨道的最小尺寸仍会计入子元素 margin（收起时泄漏 12px），收起必须归零 */
   .entry-slot.open > * { margin-top: 0.75rem; }
 
@@ -529,8 +534,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.11.05-r29 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r29</button>
+                title="当前版本 v26.11.05-r30 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r30</button>
             </div>
           </div>
         </div>
