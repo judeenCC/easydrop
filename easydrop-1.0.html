@@ -529,8 +529,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.11.05-r27 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r27</button>
+                title="当前版本 v26.11.05-r28 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r28</button>
             </div>
           </div>
         </div>
@@ -4354,14 +4354,23 @@ function onRemoteHello(msg, s) {
     interruptResendJobs.delete(deviceId);
     if (resendJob.retryTimer) { clearTimeout(resendJob.retryTimer); resendJob.retryTimer = null; } // 重试链一并熄火
     if (Date.now() - resendJob.at <= INTERRUPT_RESEND_TTL_MS) {
+      const injected = new Set();
       resendJob.items.forEach(item => {
+        if (!item) return;
         if (item.status === 'sending') return; // 防御
+        const itemId = String(item.id);
+        if (injected.has(itemId)) return; // 任务内同 id 去重
+        injected.add(itemId);
         item.status = 'pending';
         item.progress = 0;
         item.sentBytes = 0;
         item.samples = null;
         item._lastRenderProgress = 0;
         item.acked = false; // 重发需重新走 file-ack 确认（P1-1）
+        // 关键：新会话可能已由 restoreChatHistory 回填了同 id 的历史占位
+        // （无 File 句柄）。先移除同 id 占位，再放入真实条目，避免 sendFileOn
+        // 按 id 命中占位 → file.size 崩溃 → 0 B 失败循环
+        s.fileQueue = s.fileQueue.filter(f => String(f && f.id) !== itemId);
         s.fileQueue.push(item);
       });
       if (s.conn && s.conn.open) processSendQueue(s);
@@ -4832,7 +4841,10 @@ function processSendQueue(s) {
   if (!s) return;
   if (s.currentTransfer) return;
   if (!s.conn || !s.conn.open) return;
-  const next = s.fileQueue.find(i => i.status === 'pending');  if (next) sendFileOn(s, next.id);
+  // 只捡真实可发送条目：history 占位无句柄，捡起只会 0 B 失败
+  const next = s.fileQueue.find(i => i.status === 'pending' && !i.history &&
+    ((i.bundle && i.bundle.source) || i.file));
+  if (next) sendFileOn(s, next.id);
 }
 
 function getFileType(filename) {
@@ -5375,8 +5387,29 @@ function sendFile(fileId) {
 }
 
 async function sendFileOn(s, fileId) {
-  const item = s.fileQueue.find(f => String(f.id) === String(fileId));
+  // 同一 id 可能同时存在两种条目：
+  //  - 聊天历史回填占位（history:true，只有元数据，无 File 句柄）
+  //  - 真实队列条目（重发注入/本次选择，带 File 或 bundle.source）
+  // 必须优先命中带句柄的真实条目；否则按 id 先命中历史占位会在 file.size
+  // 抛 TypeError，且真实条目仍是 pending → processSendQueue 每 50ms 重试，
+  // 形成 0 B 失败风暴 + 反复 file-abort 弹窗（实测 r27 场景 3）
+  const candidates = s.fileQueue.filter(f => String(f.id) === String(fileId));
+  const hasSource = (f) => !!(f && ((f.bundle && f.bundle.source) || f.file));
+  const item = candidates.find(f => !f.history && hasSource(f)) || candidates.find(f => !f.history) || candidates[0];
   if (!item) return;
+  if (item.bundle && !item.bundle.ready) { item.status = 'packing'; return; } // 理论不可达：pending 前置 packing
+  const file = (item.bundle && item.bundle.source) || item.file;
+  if (!file || typeof file.slice !== 'function') {
+    // 句柄已失（历史占位/页面重载/系统回收）：不能发送，也不能让它保持
+    // pending 被队列反复捡起。标 failed 并只提示一次，避免刷屏
+    item.status = 'failed';
+    if (!item._handleLostNotified) {
+      item._handleLostNotified = true;
+      showToast('文件句柄已失效，请重新选择文件发送', 'warning');
+    }
+    renderFileQueue(true);
+    return;
+  }
   if (!s.conn || !s.conn.open) {
     showToast('连接未就绪', 'error');
     return;
@@ -5408,8 +5441,6 @@ async function sendFileOn(s, fileId) {
     });
 
     // 文件夹整包：bundle.ready 后 source 与 File 同接口（size/slice）
-    if (item.bundle && !item.bundle.ready) return; // 理论不可达：pending 前置 packing
-    const file = (item.bundle && item.bundle.source) || item.file;
     const t0 = Date.now();
     let offset = 0;
     let frameCount = 0;
@@ -5697,20 +5728,38 @@ function beginReceive(s, msg) {
     settleFileSink(prev, 'abort').then(mode => { if (mode === 'partial') notifyPartialSaved(prev); });
   }
 
-  const item = {
-    id: rid,
-    name: msg.name,
-    size: msg.size || 0,
-    type: msg.fileType || getFileType(msg.name),
-    progress: 0,
-    status: 'receiving',
-    blob: null,
-    samples: [{ t: Date.now(), b: 0 }],
-    receivedBytes: 0,
-    totalMs: null,
-    addedAt: Date.now()
-  };
-  s.receivedFiles.push(item);
+  // 同一 id 的重发：复用已存在的接收条目（上一轮失败/半途而废/已完成但
+  // ACK 丢失），避免每轮 file-start 都追加一个同名气泡（实测重发风暴）
+  let item = (s.receivedFiles || []).find(f => f && String(f.id) === rid);
+  if (item) {
+    stopRenderHeartbeat(item);
+    item.name = msg.name;
+    item.size = msg.size || 0;
+    item.type = msg.fileType || getFileType(msg.name);
+    item.progress = 0;
+    item.status = 'receiving';
+    item.blob = null;
+    item.samples = [{ t: Date.now(), b: 0 }];
+    item.receivedBytes = 0;
+    item.totalMs = null;
+    item.addedAt = Date.now();
+    item._lastRenderProgress = 0;
+  } else {
+    item = {
+      id: rid,
+      name: msg.name,
+      size: msg.size || 0,
+      type: msg.fileType || getFileType(msg.name),
+      progress: 0,
+      status: 'receiving',
+      blob: null,
+      samples: [{ t: Date.now(), b: 0 }],
+      receivedBytes: 0,
+      totalMs: null,
+      addedAt: Date.now()
+    };
+    s.receivedFiles.push(item);
+  }
   s.currentReceive = item;
   s.receivedChunks = [];
   s.receivedBytes = 0;
@@ -6002,6 +6051,7 @@ function wakeLockSync() {
 // 版已知硬限制，无需也无法绕过——卡片文案向用户说明，并给出「重新发送」。
 const interruptResendJobs = new Map();  // key: 对端 deviceId → { items, at }
 const INTERRUPT_RESEND_TTL_MS = 10 * 60 * 1000; // 重发任务有效期：超期不再续发、立即出表
+let interruptCardRecheckTimer = null;   // 当前中断卡的在线复查定时器（新卡接管/关卡清理）
 
 // ==================== 中断记录登记（closeSession 统一漏斗） ====================
 // 为什么在 closeSession 登记：冻结解除的瞬间，close 事件 / sendFileOn 的
@@ -6017,8 +6067,9 @@ function snapshotInterrupted(s) {
   const midReceive = s.currentReceive;
   const midSend = s.currentTransfer;
   // sent-unacked（P1-1）：已发完但未收到对方 file-ack 确认的条目，断开后一律
-  // 按中断登记重发——对端可能根本没收到尾部数据；history 条目是历史回填，排除
-  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false && !i.history));
+  // 按中断登记重发——对端可能根本没收到尾部数据；history 条目是历史回填
+  // 占位（无 File 句柄），任何状态都不得进入重发管线
+  const sendItems = (s.fileQueue || []).filter(i => !i.history && (i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false)));
   if (!midReceive && !sendItems.length) return; // 无未完成传输：普通收尾，不登记
 
   const deviceId = (s.identity && s.identity.deviceId) || '';
@@ -6038,6 +6089,7 @@ function snapshotInterrupted(s) {
     const unackedFirst = first.status === 'sent' && first.acked === false;
     entries.push({
       isSend: true, deviceId, peerName, sendItems,
+      at: s.closedAt || Date.now(), // 断连时刻（在线判定基准）
       name: midSend ? midSend.name : (first.name || '未命名文件'),
       detail: unackedFirst
         ? '已发送完毕但未收到对方接收确认，重连后自动补发' +
@@ -6267,8 +6319,8 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
     });
   }
   // sent-unacked（P1-1）：同 snapshotInterrupted 的滤网——已发完未确认的条目
-  // 断开后按中断登记；history 条目是历史回填，排除
-  const sendItems = (s.fileQueue || []).filter(i => i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false && !i.history));
+  // 断开后按中断登记；history 是历史回填占位（无句柄），任何状态都排除
+  const sendItems = (s.fileQueue || []).filter(i => !i.history && (i.status === 'failed' || i.status === 'pending' || i.status === 'packing' || (i.status === 'sent' && i.acked === false)));
   // 活尸/硬死检查路径在 closeSession 打 failed 标记之前收集：正在发送中的
   // 条目也必须算进来，否则「单文件传到一半」的会话收集结果为空 → 无卡无记录
   if (midSend && !sendItems.includes(midSend)) sendItems.unshift(midSend);
@@ -6280,6 +6332,7 @@ function interruptEntriesFromSession(s, midReceive, midSend) {
     const unackedFirst = first.status === 'sent' && first.acked === false;
     entries.push({
       isSend: true, deviceId, peerName, sendItems,
+      at: s.closedAt || Date.now(), // 断连时刻（在线判定基准）
       name: midSend ? midSend.name : (first.name || '未命名文件'),
       detail: unackedFirst
         ? '已发送完毕但未收到对方接收确认，重连后自动补发' +
@@ -6327,6 +6380,8 @@ function showInterruptCard(entries, subtext) {
     queueInterruptEntries(entries);
     return;
   }
+  // 新卡接管：上一张卡的复查定时器必须熄火，否则它会继续操作本卡 DOM
+  if (interruptCardRecheckTimer) { clearInterval(interruptCardRecheckTimer); interruptCardRecheckTimer = null; }
   const rows = entries.map(e => `
     <div class="text-left bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-600">
       <div class="font-medium text-slate-800 mb-1 truncate">
@@ -6334,7 +6389,17 @@ function showInterruptCard(entries, subtext) {
       </div>
       <div class="text-xs text-slate-400">${esc(e.detail)}${(entries.length > 1 && e.peerName) ? ' · ' + esc(e.peerName) : ''}${e.restored ? '<br>上一页面被系统回收' + (e.isSend ? '，文件需重新选择后发送' : '，等待对方重新发送') : ''}</div>
     </div>`).join('');
-  const peerLive = (deviceId) => { try { return isDeviceIdSeenLive(deviceId); } catch (e) { return false; } };
+  // 在线判定基准（P0-1）：断连前最后一条 presence 心跳在 16s TTL 内仍「新鲜」，
+  // 会把刚关网页的对端误判在线。发送条目携带断连时刻 at：只有断连之后仍收到
+  // 该设备心跳才算在线；断连前的心跳一律不算。restored 条目无 at → 退回普通判定
+  const peerLive = (e) => {
+    try {
+      const deviceId = e && e.deviceId;
+      if (!deviceId) return false;
+      if (!e.at) return isDeviceIdSeenLive(deviceId);
+      return Array.from(presencePeersLive().values()).some(rec => rec && rec.id === deviceId && rec.t > e.at);
+    } catch (err) { return false; }
+  };
   const sendTargets = [];   // 非 restored 发送条目：有文件句柄可重发
   const restoredSend = [];  // restored 发送条目：句柄已失，只能重连后手动重选
   let hasRecv = false;      // 存在接收条目（含 restored 接收）
@@ -6343,8 +6408,8 @@ function showInterruptCard(entries, subtext) {
     if (!e.restored && e.deviceId) sendTargets.push(e);
     else if (e.restored) restoredSend.push(e);
   });
-  const onlineTargets = sendTargets.filter(e => peerLive(e.deviceId));
-  const offlineTargets = sendTargets.filter(e => !peerLive(e.deviceId));
+  const onlineTargets = sendTargets.filter(e => peerLive(e));
+  const offlineTargets = sendTargets.filter(e => !peerLive(e));
   // 对端离线的发送条目（P0-1）：自动登记重发任务。不立即拨号、不弹 toast——
   // 卡片本身就是告知；静默退避重试链随后接管，对端上线即自动续发。
   // 任务已存在则合并条目（防重复登记）并刷新 TTL，重试链重挂（幂等）
@@ -6367,7 +6432,7 @@ function showInterruptCard(entries, subtext) {
   const reconnectTargets = [];
   const seenDevices = new Set();
   entries.forEach(e => {
-    if (e.isSend && e.restored && e.deviceId && !seenDevices.has(e.deviceId) && peerLive(e.deviceId)) {
+    if (e.isSend && e.restored && e.deviceId && !seenDevices.has(e.deviceId) && peerLive(e)) {
       seenDevices.add(e.deviceId); reconnectTargets.push(e);
     }
   });
@@ -6456,15 +6521,19 @@ function showInterruptCard(entries, subtext) {
   // （静默链路接管）；卡片关闭（DOM 消失）自清理，不留常驻定时器
   if (liveResend.length || liveReconnect.length) {
     const recheck = setInterval(() => {
+      const modal = document.getElementById('choiceModal');
       const subEl = document.getElementById('interruptSubtext');
       const rbtn = document.getElementById('interruptResendBtn');
       const cbtn = document.getElementById('interruptReconnectBtn');
-      if ((!subEl || !subEl.isConnected) && (!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected)) {
+      // 关卡（modal 隐藏）或卡片 DOM 已被替换 → 熄火，绝不操作下一张卡
+      if (!modal || modal.classList.contains('hidden') ||
+          ((!subEl || !subEl.isConnected) && (!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected))) {
         clearInterval(recheck);
+        if (interruptCardRecheckTimer === recheck) interruptCardRecheckTimer = null;
         return;
       }
-      const nextResend = liveResend.filter(e => peerLive(e.deviceId));
-      const nextReconnect = liveReconnect.filter(e => peerLive(e.deviceId));
+      const nextResend = liveResend.filter(e => peerLive(e));
+      const nextReconnect = liveReconnect.filter(e => peerLive(e));
       liveResend.forEach(e => { if (!nextResend.includes(e)) registerOfflineJob(e); }); // 转离线：登记静默续发
       liveResend = nextResend;
       liveReconnect = nextReconnect;
@@ -6477,8 +6546,12 @@ function showInterruptCard(entries, subtext) {
         if (sendTargets.length && !liveResend.length) subEl.innerHTML = OFFLINE_SUB;
         else if (sendTargets.length && liveResend.length) subEl.innerHTML = DEFAULT_SUB;
       }
-      if (!liveResend.length && !liveReconnect.length) clearInterval(recheck);
+      if (!liveResend.length && !liveReconnect.length) {
+        clearInterval(recheck);
+        if (interruptCardRecheckTimer === recheck) interruptCardRecheckTimer = null;
+      }
     }, 2000);
+    interruptCardRecheckTimer = recheck;
   }
   // 网络恢复补按钮：监听 online/offline；卡片已关（元素不在 DOM）时自清理，
   // 不留常驻监听
@@ -6486,9 +6559,12 @@ function showInterruptCard(entries, subtext) {
     const applyNetGate = () => {
       let up = true;
       try { up = navigator.onLine !== false; } catch (e) { /* 保持默认 */ }
+      const modal = document.getElementById('choiceModal');
       const rbtn = document.getElementById('interruptResendBtn');
       const cbtn = document.getElementById('interruptReconnectBtn');
-      if ((!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected)) {
+      // 关卡/卡片被替换 → 摘掉监听，避免每张卡累积 online/offline 监听
+      if (!modal || modal.classList.contains('hidden') ||
+          ((!rbtn || !rbtn.isConnected) && (!cbtn || !cbtn.isConnected))) {
         window.removeEventListener('online', applyNetGate);
         window.removeEventListener('offline', applyNetGate);
         return;
@@ -6497,7 +6573,7 @@ function showInterruptCard(entries, subtext) {
       if (rbtn) rbtn.style.display = (up && liveResend.length) ? '' : 'none';
       if (cbtn) cbtn.style.display = (up && liveReconnect.length) ? '' : 'none';
       const hintEl = document.getElementById('interruptOfflineHint');
-      if (hintEl) hintEl.classList.toggle('hidden', up);
+      if (hintEl) hintEl.classList.toggle('hidden', up || (!liveResend.length && !liveReconnect.length));
     };
     window.addEventListener('online', applyNetGate);
     window.addEventListener('offline', applyNetGate);
@@ -6581,6 +6657,7 @@ function disconnect() {
 function closeSession(s, cause) {
   if (!s || s.closed) return;
   s.closed = true;
+  s.closedAt = Date.now(); // 断连时刻：中断卡用它区分「断连前的心跳」与「断连后仍在的心跳」
   s.fileQueue.forEach(stopRenderHeartbeat);
   s.receivedFiles.forEach(stopRenderHeartbeat);
   if (s.currentTransfer) s.currentTransfer.status = 'failed';
