@@ -257,6 +257,20 @@ tailwind.config = {
     font-weight: 600;
   }
 
+  /* 聊天输入框（r31：input→textarea 支持自动换行）。高度由 autoGrowChatInput
+     随内容增长（上限约 6 行，超出后内部滚动）；这里只管形态：禁手动拉伸、
+     未超上限时不出现滚动条（避免每行闪烁） */
+  #chatTextInput { resize: none; overflow-y: hidden; }
+  /* 胶囊圆角与展开态圆角都走自定义规则（HTML 不挂 rounded-full）：不依赖
+     Tailwind CDN 对动态新增类的异步生成，层叠结果确定 */
+  #chatInputBar { border-radius: 9999px; }
+  #chatInputBar.chat-input-grown { border-radius: 1.5rem; }
+
+  /* 多行文本气泡的换行/截断保底：与 Tailwind 工具类（whitespace-pre-wrap
+     break-all max-h-40 overflow-y-auto）等价，动态渲染的首条消息不等
+     CDN 生成规则即正确显示 */
+  .chat-bubble-text { white-space: pre-wrap; word-break: break-all; max-height: 10rem; overflow-y: auto; }
+
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -534,8 +548,8 @@ tailwind.config = {
             <div class="flex items-center gap-1.5">
               <p class="hidden sm:block text-xs text-slate-400">跨网络文件传输</p>
               <button type="button" onclick="location.href = location.pathname + '?v=' + Date.now()"
-                title="当前版本 v26.11.05-r30 · 双方版本需一致才能互连。点此强制刷新到最新版"
-                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r30</button>
+                title="当前版本 v26.11.05-r31 · 双方版本需一致才能互连。点此强制刷新到最新版"
+                class="text-[10px] leading-none text-slate-300 hover:text-primary-500 transition-colors cursor-pointer">v26.11.05-r31</button>
             </div>
           </div>
         </div>
@@ -822,7 +836,7 @@ tailwind.config = {
               </div>
             </div>
 
-            <div id="chatInputBar" class="bg-slate-50 border border-slate-200 rounded-full pl-2 pr-2 py-1.5 flex items-center gap-1 transition-all">
+            <div id="chatInputBar" class="bg-slate-50 border border-slate-200 pl-2 pr-2 py-1.5 flex items-center gap-1 transition-all">
               <input type="file" id="fileInput" multiple class="hidden">
               <input type="file" id="folderInput" webkitdirectory multiple class="hidden">
               <button id="chatAddFileBtn" disabled data-tip="发送文件" data-tip-off="对方未连接，无法发送文件" onclick="document.getElementById('fileInput').click()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0" title="发送文件">
@@ -834,7 +848,7 @@ tailwind.config = {
               <button id="chatAddClipBtn" disabled data-tip="发送剪贴板内容" data-tip-off="对方未连接，无法发送剪贴板" onclick="sendClipboard()" class="w-10 h-10 rounded-full hover:bg-slate-200/60 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0" title="发送剪贴板内容">
                 <i class="fas fa-clipboard text-slate-400"></i>
               </button>
-              <input type="text" id="chatTextInput" disabled placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 bg-transparent px-2 text-sm outline-none text-slate-700 placeholder-slate-400" onkeydown="if(event.key==='Enter')sendChatText()" onpaste="handleChatPaste(event)">
+              <textarea id="chatTextInput" rows="1" disabled placeholder="发送消息..." autocomplete="off" class="flex-1 min-w-0 block bg-transparent px-2 py-0.5 text-sm leading-5 outline-none text-slate-700 placeholder-slate-400 resize-none" onkeydown="handleChatKeydown(event)" oninput="autoGrowChatInput()" onpaste="handleChatPaste(event)"></textarea>
               <button disabled onclick="sendChatText()" id="chatSendBtn" class="px-4 h-10 rounded-full text-sm font-medium text-primary-500 hover:bg-primary-500/10 transition-all flex-shrink-0 disabled:text-slate-300 disabled:hover:bg-transparent">发送</button>
             </div>
           </div>
@@ -5040,7 +5054,7 @@ function buildChatItemEl(entry, s, animate) {
           <span class="text-xs ${entry.dir === 'out' ? 'text-slate-400' : 'text-slate-400'}">${esc(item.label || '文本消息')}</span>
           <button type="button" data-copy class="text-xs ${entry.dir === 'out' ? 'text-slate-400 hover:text-primary-500' : 'text-slate-400 hover:text-primary-500'} transition-all flex-shrink-0"><i class="fas fa-copy mr-1"></i>复制</button>
         </div>
-        <div class="text-sm whitespace-pre-wrap break-all max-h-40 overflow-y-auto">${esc(display)}</div>
+        <div class="text-sm chat-bubble-text whitespace-pre-wrap break-all max-h-40 overflow-y-auto">${esc(display)}</div>
       </div>
     `;
     const copyBtn = wrap.querySelector('[data-copy]');
@@ -5600,6 +5614,31 @@ function pushChatText(s, dir, label, content) {
   renderChat(true);
 }
 
+// 聊天输入框键盘行为（r31：input→textarea）：Enter 发送、Shift+Enter 换行。
+// IME 组合期的 Enter（确认拼音候选，isComposing/keyCode 229）不发送——旧 input
+// 的内联处理没有这层防护，中文输入法确认候选会误触发送，这里一并修复
+function handleChatKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    sendChatText();
+  }
+}
+
+// 输入框随内容自动长高：内容超长时换行并把输入条撑高（上限约 6 行，
+// 之后内部滚动）；清空/发送后缩回单行。≥2 行时胶囊条改圆角矩形更好看
+const CHAT_INPUT_MAX_H = 120;
+function autoGrowChatInput() {
+  const ta = document.getElementById('chatTextInput');
+  if (!ta) return;
+  ta.style.height = 'auto'; // 先归位再量 scrollHeight，保证收缩也正确
+  const grown = ta.scrollHeight > 30; // 1 行 ≈ 24px，≥2 行算展开
+  ta.style.height = Math.min(ta.scrollHeight, CHAT_INPUT_MAX_H) + 'px';
+  ta.style.overflowY = ta.scrollHeight > CHAT_INPUT_MAX_H ? 'auto' : 'hidden';
+  const bar = document.getElementById('chatInputBar');
+  if (bar) bar.classList.toggle('chat-input-grown', grown); // 展开态圆角走自定义规则
+}
+
 function sendChatText() {
   const input = document.getElementById('chatTextInput');
   const text = input ? input.value.trim() : '';
@@ -5614,6 +5653,7 @@ function sendChatText() {
   }
   if (sendTextMessage(s, text, 'text-message')) {
     input.value = '';
+    autoGrowChatInput(); // 已清空：输入条缩回单行
     pushChatText(s, 'out', '文本消息', text);
   }
 }
